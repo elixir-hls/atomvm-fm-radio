@@ -5,5 +5,5 @@
   "atomvm_tang25k_rpi_display_35inch": {:git, "https://github.com/elixir-hls/atomvm-tang25k-rpi-display-3.5inch.git", "f40f3daddf7d0cde7aac6561db5f45aff32e04fe", []},
   "atomvm_tang25k_rtlsdr": {:git, "https://github.com/elixir-hls/atomvm-tang25k-rtlsdr.git", "d122b532d4b16396e36bf1d5dd7ec54b2d084726", []},
   "atomvm_tang25k_usb_host": {:git, "https://github.com/elixir-hls/atomvm-tang25k-usb-host.git", "ddb35a06b8fa62b9a75b3a7cb86d5e28c2e62643", []},
-  "elixir_hls": {:git, "https://github.com/elixir-hls/elixir-hls.git", "9db49bebd8b72795718000423e26df5082d4b0d2", []},
+  "elixir_hls": {:git, "https://github.com/elixir-hls/elixir-hls.git", "017d632fc5c84eae4ebe839b02d623a83fa8d14e", []},
 }
