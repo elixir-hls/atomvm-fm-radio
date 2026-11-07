@@ -21,7 +21,7 @@ the USB host's PHY, two MAX98357A I2S amplifiers (one per channel) on PMOD J5 an
 ```elixir
 use EHLS, blocks: [EHLS.USBHost, EHLS.I2S, EHLS.RPiDisplay35], peripherals: [:lcd]
 
-defpipeline radio do
+definstance radio do
   usb_bulk_in()
   |> iq_pair()                                        # IQ bytes -> {I, Q} words
   |> window(31) |> map(&chan_tap/1)                   # channel filter

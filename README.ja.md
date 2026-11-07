@@ -23,7 +23,7 @@ Elixir のプログラムがタッチパネルの画面を動かします。
 ```elixir
 use EHLS, blocks: [EHLS.USBHost, EHLS.I2S, EHLS.RPiDisplay35], peripherals: [:lcd]
 
-defpipeline radio do
+definstance radio do
   usb_bulk_in()
   |> iq_pair()                                        # IQ のバイト -> {I, Q} のワード
   |> window(31) |> map(&chan_tap/1)                   # チャネルフィルタ

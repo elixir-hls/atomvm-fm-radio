@@ -8,7 +8,7 @@ defmodule FMRadio do
 
   # The volume, gain / 256 on both channels (32 = -18 dB, at most 256), a param: set while
   # playing with radio(:set, :gain, g)
-  defhw volume(frame :: u32, gain :: param(u9) \\ 6) :: u32 do
+  defhls volume(frame :: u32, gain :: param(u9) \\ 6) :: u32 do
     g = if gain > 256, do: 256, else: gain
     l = signed(frame &&& 0xFFFF, 16) * g >>> 8
     r = signed(frame >>> 16, 16) * g >>> 8
@@ -17,7 +17,7 @@ defmodule FMRadio do
 
   # The peak level of the audio (decaying by 2^-12 per sample, ~85 ms): the frames pass
   # through, the state is the level; radio(:state, :level) reads it while playing
-  defhw level(frame :: u32, peak :: u16 \\ 0) :: u32 do
+  defhls level(frame :: u32, peak :: u16 \\ 0) :: u32 do
     v = signed(frame &&& 0xFFFF, 16)
     a = if v < 0, do: -v, else: v
     decayed = peak - (peak >>> 12)
@@ -27,7 +27,7 @@ defmodule FMRadio do
   # IQ bytes (I, Q, I, Q, ...; offset binary) -> one {I[15:8], Q[7:0]} word per sample, the
   # bytes as signed values (so that a zero-filled history means silence): every other byte
   # produces nothing (emit / skip)
-  defhw iq_pair(b :: u8, st :: {u8, u8} \\ {0, 0}) :: emit(u16) do
+  defhls iq_pair(b :: u8, st :: {u8, u8} \\ {0, 0}) :: emit(u16) do
     {have_i, i} = st
     if have_i == 1, do: {emit((i <<< 8 ||| b) ^^^ 0x8080), {0, 0}}, else: {skip(), {1, b}}
   end
@@ -37,7 +37,7 @@ defmodule FMRadio do
   # Bit-exact with chan_fir.v (test/ref/chan.sh).
   @chan FMCoeffs.chan()
 
-  defhw chan_tap(w :: window(u16, 31)) :: u16 do
+  defhls chan_tap(w :: window(u16, 31)) :: u16 do
     {ai, aq} =
       for j <- 0..7, reduce: {0, 0} do
         acc ->
@@ -65,7 +65,7 @@ defmodule FMRadio do
   # (test/ref/disc.sh).
   @atan [8192, 4836, 2555, 1297, 651, 326, 163, 81, 41, 20, 10, 5, 3, 1, 1, 0]
 
-  defhw phase(iq :: u32) :: u16 do
+  defhls phase(iq :: u32) :: u16 do
     i = (iq >>> 8 &&& 0xFF) - 128
     q = (iq &&& 0xFF) - 128
     # into the right half plane (x >= 0)
@@ -89,7 +89,7 @@ defmodule FMRadio do
     z
   end
 
-  defhw phase_step(ph :: u16, prev :: u16 \\ 0) :: s16 do
+  defhls phase_step(ph :: u16, prev :: u16 \\ 0) :: s16 do
     {signed(ph - prev, 16), ph}
   end
 
@@ -101,7 +101,7 @@ defmodule FMRadio do
   # ring buffer in a memory, the taps in a loop). Bit-exact with fir_dec.v (test/ref/fir.sh).
 
   # d (s16, 960 kS/s) -> MPX x (s18): 32 taps, saturated (every 4th: 240 kS/s)
-  defhw mpx_tap(w :: window(s16, 32)) :: s18 do
+  defhls mpx_tap(w :: window(s16, 32)) :: s18 do
     v = Enum.sum(for k <- 0..31, do: w[k] * table(@fir1, k)) >>> 15
     if v > 131_071, do: 131_071, else: if(v < -131_072, do: -131_072, else: v)
   end
@@ -115,7 +115,7 @@ defmodule FMRadio do
   # 32 bits: |i_lp|, |q_lp| < 2^17.
   @sin FMCoeffs.sin()
 
-  defhw pilot_pll(x :: s18, st :: {u32, s32, s24, s24, u32, s32, s32, u32} \\ {0, 0, 0, 0, 0, 0, 0, 0}) :: {s18, s20} do
+  defhls pilot_pll(x :: s18, st :: {u32, s32, s24, s24, u32, s32, s32, u32} \\ {0, 0, 0, 0, 0, 0, 0, 0}) :: {s18, s20} do
     {theta, integ, i_lp, q_lp, win, si, sq, pilot} = st
     a = theta >>> 22
     s1 = table(@sin, a)
@@ -149,7 +149,7 @@ defmodule FMRadio do
 
   # {x, m} (240 kS/s) -> {L+R, L-R} (s22 each, 48 kHz): FIR2 (224 taps, every 5th) on both, in
   # one loop (two buffer reads and one coefficient per tap)
-  defhw stereo_tap(w :: window({s18, s20}, 224)) :: {s22, s22} do
+  defhls stereo_tap(w :: window({s18, s20}, 224)) :: {s22, s22} do
     {s, d} =
       for k <- 0..223, reduce: {0, 0} do
         {s, d} ->
@@ -164,7 +164,7 @@ defmodule FMRadio do
   # {L+R, L-R} -> a frame {R, L} (16 bits each): DC block (rounded, 2^-10), blend (0 = mono
   # .. 256 = full stereo, a param), matrix, 50 us de-emphasis per channel, saturation.
   # Bit-exact with stereo_out.v.
-  defhw stereo_out(sd :: {s22, s22}, st :: {s22, s32, s32} \\ {0, 0, 0}, blend :: param(u9) \\ 256) :: u32 do
+  defhls stereo_out(sd :: {s22, s22}, st :: {s22, s32, s32} \\ {0, 0, 0}, blend :: param(u9) \\ 256) :: u32 do
     {s, d} = sd
     {dc, yl, yr} = st
     dc2 = signed(dc + ((s - dc + 512) >>> 10), 22)
@@ -181,7 +181,7 @@ defmodule FMRadio do
     {(ol &&& 0xFFFF) ||| (orr &&& 0xFFFF) <<< 16, {dc2, yl2, yr2}}
   end
 
-  defpipeline radio do
+  definstance radio do
     usb_bulk_in()
     |> iq_pair()
     |> window(31) |> map(&chan_tap/1)
@@ -211,7 +211,6 @@ defmodule FMRadio do
 
   defp play_at(freq) do
     IO.puts("fm: open RTL-SDR at #{mhz(freq)} MHz: #{inspect(open(freq, 3))}")
-    radio(:start)
     :ok = RTLSDR.start()
   end
 
