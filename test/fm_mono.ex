@@ -1,9 +1,9 @@
 defmodule FMMono do
   @moduledoc """
   The mono end of the FM radio before stereo (P3): L+R only, for the reference tests
-  (test/ref/fir.sh, mono_out.sh). Not built into the SoC.
+  (test/ref/fir.sh, mono_out.sh): stream functions, run on the CPU. Not built into the SoC.
   """
-  use EHLS, blocks: [EHLS.USBHost, EHLS.I2S]
+  use EHLS
 
   @fir2 FMCoeffs.fir2()
 
@@ -15,7 +15,7 @@ defmodule FMMono do
   # L+R at 48 kHz (s22 in a word) -> a mono frame: DC block (rounded, 2^-10), 50 us
   # de-emphasis (y += ((v << 8) - y) * 87 >> 8), saturation to 16 bits. Bit-exact with
   # stereo_out.v at blend 0 (test/ref/mono_out.sh).
-  defhls deemphasis(s :: s32, st :: {s32, s32} \\ {0, 0}) :: u32 do
+  defhls deemphasis(s :: s32, st :: state({s32, s32})) :: u32 do
     {dc, y} = st
     dc2 = dc + ((s - dc + 512) >>> 10)
     sp = s - dc2
@@ -25,10 +25,12 @@ defmodule FMMono do
     {(o &&& 0xFFFF) ||| (o &&& 0xFFFF) <<< 16, {dc2, y2}}
   end
 
-  definstance mono do
-    usb_bulk_in()
-    |> window(224) |> every(5) |> map(&audio_tap/1)
-    |> scan(&deemphasis/2)
-    |> i2s_out()
+  # MPX x -> L+R at 48 kHz (FIR /5)
+  defhls audio(x :: stream(s18)) :: stream(s22) do
+    x |> window(224) |> every(5) |> map(&audio_tap/1)
+  end
+
+  defhls mono(x :: stream(s18)) :: stream(u32) do
+    x |> audio() |> transform({0, 0}, &deemphasis/2)
   end
 end
