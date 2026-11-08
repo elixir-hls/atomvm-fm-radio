@@ -3,7 +3,7 @@
 English | [日本語](README.ja.md)
 
 A stereo FM radio on AtomVM (Sipeed Tang Primer 25K) whose whole demodulator is written in
-Elixir and runs in the FPGA: the RTL-SDR's IQ goes from the USB host through the pipeline to
+Elixir and runs in the FPGA: the RTL-SDR's IQ goes from the USB host through the demodulator to
 the I2S amplifiers without passing through the CPU, while Elixir on the CPU runs the touch
 screen panel. Built with [atomvm-tang25k-hls](https://github.com/elixir-hls/atomvm-tang25k-hls) (with [elixir-hls](https://github.com/elixir-hls/elixir-hls))
 and the part packages (mix.exs, hls.env)
@@ -21,16 +21,34 @@ the USB host's PHY, two MAX98357A I2S amplifiers (one per channel) on PMOD J5 an
 ```elixir
 use EHLS, blocks: [EHLS.USBHost, EHLS.I2S, EHLS.RPiDisplay35], peripherals: [:lcd]
 
+# the demodulator in four stream functions (lib/fm_radio.ex), joined with |>
+defhls channel(iq :: stream(u16)) :: stream(u16) do                   # channel filter
+  iq |> window(31) |> map(&chan_tap/1)
+end
+
+defhls discriminator(iq :: stream(u16)) :: stream(s16) do             # CORDIC phase, its difference: FM
+  iq |> map(&phase/1) |> transform(0, &phase_step/2)
+end
+
+defhls mpx(d :: stream(s16)) :: stream(s18) do                        # FIR /4: MPX at 240 kS/s
+  d |> window(32) |> every(4) |> map(&mpx_tap/1)
+end
+
+defhls stereo(x :: stream(s18)) :: stream(u32) do
+  x
+  |> transform({0, 0, 0, 0, 0, 0, 0, 0}, &pilot_pll/2, name: :pilot)  # 19 kHz pilot PLL, L-R mixed down, pilot windows
+  |> window(224) |> every(5) |> map(&stereo_tap/1)                    # FIR /5: {L+R, L-R} at 48 kHz
+  |> transform({0, 0, 0}, &stereo_out/3)                              # blend, matrix, de-emphasis -> {R, L}
+end
+
 definstance radio do
   usb_bulk_in()
-  |> iq_pair()                                        # IQ bytes -> {I, Q} words
-  |> window(31) |> map(&chan_tap/1)                   # channel filter
-  |> map(&phase/1) |> scan(&phase_step/2)             # CORDIC phase, its difference: FM
-  |> window(32) |> every(4) |> map(&mpx_tap/1)        # FIR /4: MPX at 240 kS/s
-  |> scan(&pilot_pll/2)                               # 19 kHz pilot PLL, L-R mixed down, pilot windows
-  |> window(224) |> every(5) |> map(&stereo_tap/1)    # FIR /5: {L+R, L-R} at 48 kHz
-  |> scan(&stereo_out/3)                              # blend, matrix, de-emphasis -> {R, L}
-  |> scan(&level/2)                                   # peak level (readable state)
+  |> transform({0, 0}, &iq_pair/2)                    # IQ bytes -> {I, Q} words
+  |> channel()
+  |> discriminator()
+  |> mpx()
+  |> stereo()
+  |> transform(0, &level/2, name: :level)             # peak level (readable state)
   |> map(&volume/2)                                   # gain (param)
   |> i2s_out()
 end
@@ -57,7 +75,7 @@ The screen redraws only what changed, the status line at most once a second. Whe
 stops for a second the panel opens the RTL-SDR again. `FMDemo` is a scripted run instead
 (mono / stereo, two stations, 32 s).
 
-The pipeline from the console:
+The radio from the console:
 
 ```elixir
 FMRadio.radio(:set, :gain, 16)      # volume
@@ -90,7 +108,7 @@ B=deps/atomvm_tang25k/scripts                         # once: the base's LiteX, 
 $B/setup_litex.sh && $B/setup_atomvm.sh && $B/build_host.sh
 
 H=deps/atomvm_tang25k_hls/scripts
-$H/build_kernel.sh lib/fm_radio.ex lib/fm_coeffs.ex   # 10 kernels, each checked in simulation
+$H/build_kernel.sh lib/fm_radio.ex lib/fm_coeffs.ex   # 12 kernels, each checked in simulation
 $H/build_soc.sh                                       # the SoC (a few minutes; the placement option from hls.env)
 $H/build_atomvm.sh && $H/flash.sh vm lib              # AtomVM with the USB host / LCD NIFs
 $H/build_ex.sh fm_radio FMRadio
@@ -107,7 +125,8 @@ too.
 ## Tests
 
 test/ref/*.sh compare the Elixir functions bit for bit with the Verilog demodulator of
-usb-rtl-sdr-tang25k they replace (test/ref/rtl/): `chan.sh` (channel filter), `disc.sh`
+usb-rtl-sdr-tang25k they replace (test/ref/rtl/), the stream functions run on the CPU with a
+list: `chan.sh` (channel filter), `disc.sh`
 (CORDIC discriminator), `fir.sh` (both FIRs), `mono_out.sh` (de-emphasis), `stereo.sh`
 (pilot PLL with its pilot windows, stereo FIR, matrix).
 

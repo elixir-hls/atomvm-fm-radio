@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# FMRadio.phase |> phase_step (Elixir, the CPU clauses: CORDIC + phase difference) against
+# FMRadio.discriminator (map(&phase/1) |> transform(0, &phase_step/2) on the CPU: CORDIC +
+# phase difference) against
 # fm_disc.v of usb-rtl-sdr-tang25k: N {I, Q} samples (an FM-like rotating phasor of varying
 # amplitude, plus random words and the corners), the outputs d compared.
 set -euo pipefail
@@ -24,7 +25,7 @@ elixir -pa "$W/beams" -e '
   rnd = for _ <- 1..(n - length(corners) - length(fm)), do: :rand.uniform(65536) - 1
   xs = corners ++ fm ++ rnd
   File.write!(Path.join(dir, "in.hex"), Enum.map(xs, &(Integer.to_string(&1, 16) <> "\n")))
-  {ds, _} = Enum.map_reduce(xs, FMRadio.phase_step(:init), fn x, st -> FMRadio.phase_step(FMRadio.phase(x), st) end)
+  ds = FMRadio.discriminator(xs)
   File.write!(Path.join(dir, "elixir.txt"), Enum.map(ds, &(String.pad_leading(Integer.to_string(&1 &&& 0xFFFF, 16), 4, "0") <> "\n")))
 ' "$N" "$W"
 iverilog -g2012 -o "$W/sim" disc_tb.v "$RTL/fm_disc.v"

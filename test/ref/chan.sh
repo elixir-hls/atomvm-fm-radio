@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# FMRadio.iq_pair's signed {I, Q} |> chan_tap (as the pipeline fuses it: window(31) |>
-# map(&chan_tap/1), its CPU clause) against chan_fir.v of usb-rtl-sdr-tang25k: N {I, Q}
+# FMRadio.channel (the stream function window(31) |> map(&chan_tap/1), on the CPU) on
+# iq_pair's signed {I, Q} against chan_fir.v of usb-rtl-sdr-tang25k: N {I, Q}
 # samples (a strong rotating phasor, random words, the corners), the output words compared.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -25,7 +25,7 @@ elixir -pa "$W/beams" -e '
   xs = corners ++ ph ++ rnd
   File.write!(Path.join(dir, "in.hex"), Enum.map(xs, &(Integer.to_string(&1, 16) <> "\n")))
   # iq_pair hands on the bytes as signed values
-  {ys, _} = EHLS.run_cpu(&FMRadio.chan_tap_w31_e1/2, Enum.map(xs, &bxor(&1, 0x8080)), FMRadio.chan_tap_w31_e1(:init))
+  ys = FMRadio.channel(Enum.map(xs, &bxor(&1, 0x8080)))
   File.write!(Path.join(dir, "elixir.txt"), Enum.map(ys, &(String.pad_leading(Integer.to_string(&1, 16), 4, "0") <> "\n")))
 ' "$N" "$W"
 iverilog -g2012 -I "$RTL" -o "$W/sim" chan_tb.v "$RTL/chan_fir.v"
