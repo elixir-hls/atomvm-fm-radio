@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# FMRadio.pilot_pll |> stereo_tap (as the pipeline fuses it) |> stereo_out (the CPU clauses)
-# against the stereo end of fm_stereo.v of usb-rtl-sdr-tang25k (stereo_pll, fir_dec x 2,
+# FMRadio.stereo (pilot_pll |> stereo_tap |> stereo_out, the stream function on the CPU) and
+# pilot_pll's state (the step function called directly, for the pilot windows) against the stereo end of fm_stereo.v of usb-rtl-sdr-tang25k (stereo_pll, fir_dec x 2,
 # stereo_out at blend 256): N MPX samples at 240 kS/s (L = 1 kHz, R = 1.7 kHz, the 38 kHz
 # subcarrier, the 19 kHz pilot, noise), the {R, L} output frames and the pilot windows (2^14
 # samples each: pilot_i / pilot_q / count) compared.
@@ -24,18 +24,17 @@ elixir -pa "$W/beams" -e '
     round(20480 * 2 * mpx) + :rand.uniform(400) - 200
   end
   File.write!(Path.join(dir, "in.hex"), Enum.map(xs, &(Integer.to_string(&1 &&& 0x3FFFF, 16) <> "\n")))
-  {xm, sts} = Enum.map_reduce(xs, {FMRadio.pilot_pll(:init), []}, fn x, {st, ps} ->
-    {y, st} = FMRadio.pilot_pll(x, st)
+  {_, ps} = Enum.reduce(xs, {{0, 0, 0, 0, 0, 0, 0, 0}, []}, fn x, {st, ps} ->
+    {_y, st} = FMRadio.pilot_pll(x, st)
     {_, _, _, _, win, _, _, p} = st
     # a window ended: the pilot word and the window count
     ps = if (win &&& 0x3FFF) == 0, do: [{p, win >>> 14} | ps], else: ps
-    {y, {st, ps}}
+    {st, ps}
   end)
-  {_, ps} = sts
   File.write!(Path.join(dir, "elixir_pilot.txt"), for({p, s} <- Enum.reverse(ps),
     do: "P #{String.pad_leading(Integer.to_string(p, 16), 8, "0")} #{String.pad_leading(Integer.to_string(s, 16), 2, "0")}\n"))
-  {sd, _} = EHLS.run_cpu(&FMRadio.stereo_tap_w224_e5/2, xm, FMRadio.stereo_tap_w224_e5(:init))
-  {ys, _} = Enum.map_reduce(sd, FMRadio.stereo_out(:init), &FMRadio.stereo_out(&1, &2, 256))
+  # blend: its default, 256
+  ys = FMRadio.stereo(xs)
   File.write!(Path.join(dir, "elixir.txt"), Enum.map(ys, &(String.pad_leading(Integer.to_string(&1, 16), 8, "0") <> "\n")))
 ' "$N" "$W"
 iverilog -g2012 -I "$RTL" -o "$W/sim" stereo_tb.v "$RTL/stereo_pll.v" \

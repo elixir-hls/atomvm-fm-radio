@@ -2,7 +2,7 @@ defmodule FMRadio do
   @moduledoc """
   A stereo FM radio described in Elixir. The RTL-SDR's IQ goes from the USB host through the
   demodulator to the I2S amplifiers inside the FPGA; Elixir sets the RTL-SDR up, starts /
-  stops the pipeline and controls it while it runs (tuning, volume, level).
+  stops the instance `radio` and controls it while it runs (tuning, volume, level).
   """
   use EHLS, blocks: [EHLS.USBHost, EHLS.I2S, EHLS.RPiDisplay35], peripherals: [:lcd]
 
@@ -25,8 +25,9 @@ defmodule FMRadio do
   end
 
   # The peak level of the audio (decaying by 2^-12 per sample, ~85 ms): the frames pass
-  # through, the state is the level; radio(:state, :level) reads it while playing
-  defhls level(frame :: u32, peak :: u16 \\ 0) :: u32 do
+  # through, the state is the level; placed as transform(0, &level/2, name: :level),
+  # radio(:state, :level) reads it while playing
+  defhls level(frame :: u32, peak :: state(u16)) :: u32 do
     v = signed(frame &&& 0xFFFF, 16)
     a = if v < 0, do: -v, else: v
     decayed = peak - (peak >>> 12)
@@ -36,7 +37,7 @@ defmodule FMRadio do
   # IQ bytes (I, Q, I, Q, ...; offset binary) -> one {I[15:8], Q[7:0]} word per sample, the
   # bytes as signed values (so that a zero-filled history means silence): every other byte
   # produces nothing (emit / skip)
-  defhls iq_pair(b :: u8, st :: {u8, u8} \\ {0, 0}) :: emit(u16) do
+  defhls iq_pair(b :: u8, st :: state({u8, u8})) :: emit(u16) do
     {have_i, i} = st
     if have_i == 1, do: {emit((i <<< 8 ||| b) ^^^ 0x8080), {0, 0}}, else: {skip(), {1, b}}
   end
@@ -72,7 +73,7 @@ defmodule FMRadio do
   # (test/ref/disc.sh).
   @atan [8192, 4836, 2555, 1297, 651, 326, 163, 81, 41, 20, 10, 5, 3, 1, 1, 0]
 
-  defhls phase(iq :: u32) :: u16 do
+  defhls phase(iq :: u16) :: u16 do
     i = (iq >>> 8 &&& 0xFF) - 128
     q = (iq &&& 0xFF) - 128
     # into the right half plane (x >= 0)
@@ -96,16 +97,16 @@ defmodule FMRadio do
     z
   end
 
-  defhls phase_step(ph :: u16, prev :: u16 \\ 0) :: s16 do
+  defhls phase_step(ph :: u16, prev :: state(u16)) :: s16 do
     {signed(ph - prev, 16), ph}
   end
 
   @fir1 FMCoeffs.fir1()
   @fir2 FMCoeffs.fir2()
 
-  # The FIRs as pure functions of a window of the stream (w[0] the newest word); the
-  # pipeline's window(n) |> every(k) |> map(&f/1) makes each one time-multiplexed kernel (a
-  # ring buffer in a memory, the taps in a loop). Bit-exact with fir_dec.v (test/ref/fir.sh).
+  # The FIRs as pure functions of a window of the stream (w[0] the newest element);
+  # window(n) |> every(k) |> map(&f/1) places each one as a time-multiplexed kernel (a ring
+  # buffer in a memory, the taps in a loop). Bit-exact with fir_dec.v (test/ref/fir.sh).
 
   # d (s16, 960 kS/s) -> MPX x (s18): 32 taps, saturated (every 4th: 240 kS/s)
   defhls mpx_tap(w :: window(s16, 32)) :: s18 do
@@ -114,15 +115,15 @@ defmodule FMRadio do
   end
 
   # Stereo. The pilot PLL locks to the 19 kHz pilot and mixes the L-R channel down from 38
-  # kHz: each MPX sample x becomes a frame {x, m} (a tuple: two stream words). It also
+  # kHz: each MPX sample x becomes {x, m} (a tuple: one element, both in one clock). It also
   # measures the pilot: over each window of 2^14 samples (68 ms) the sums of its low-passed
   # in-phase and quadrature parts, at the window's end their means (saturated to 16 bits) in
   # `pilot` {Q[31:16], I[15:0]} and the window count in `win` (bits 21:14; bits 13:0 count
-  # the samples) for FMStereo. Bit-exact with stereo_pll.v (test/ref/stereo.sh). The sums fit
-  # 32 bits: |i_lp|, |q_lp| < 2^17.
+  # the samples) for FMStereo, which reads the state (named :pilot) with pilot/0. Bit-exact
+  # with stereo_pll.v (test/ref/stereo.sh). The sums fit 32 bits: |i_lp|, |q_lp| < 2^17.
   @sin FMCoeffs.sin()
 
-  defhls pilot_pll(x :: s18, st :: {u32, s32, s24, s24, u32, s32, s32, u32} \\ {0, 0, 0, 0, 0, 0, 0, 0}) :: {s18, s20} do
+  defhls pilot_pll(x :: s18, st :: state({u32, s32, s24, s24, u32, s32, s32, u32})) :: {s18, s20} do
     {theta, integ, i_lp, q_lp, win, si, sq, pilot} = st
     a = theta >>> 22
     s1 = table(@sin, a)
@@ -171,7 +172,7 @@ defmodule FMRadio do
   # {L+R, L-R} -> a frame {R, L} (16 bits each): DC block (rounded, 2^-10), blend (0 = mono
   # .. 256 = full stereo, a param), matrix, 50 us de-emphasis per channel, saturation.
   # Bit-exact with stereo_out.v.
-  defhls stereo_out(sd :: {s22, s22}, st :: {s22, s32, s32} \\ {0, 0, 0}, blend :: param(u9) \\ 256) :: u32 do
+  defhls stereo_out(sd :: {s22, s22}, st :: state({s22, s32, s32}), blend :: param(u9) \\ 256) :: u32 do
     {s, d} = sd
     {dc, yl, yr} = st
     dc2 = signed(dc + ((s - dc + 512) >>> 10), 22)
@@ -188,17 +189,41 @@ defmodule FMRadio do
     {(ol &&& 0xFFFF) ||| (orr &&& 0xFFFF) <<< 16, {dc2, yl2, yr2}}
   end
 
+  # The demodulator in four stream functions, each one compared with the Verilog it replaces
+  # (test/ref/*.sh): on the CPU they take a list and give a list, from the initial states.
+
+  # signed {I, Q} words -> the channel filter's output (offset binary)
+  defhls channel(iq :: stream(u16)) :: stream(u16) do
+    iq |> window(31) |> map(&chan_tap/1)
+  end
+
+  # {I, Q} (offset binary) -> the instantaneous frequency d (960 kS/s)
+  defhls discriminator(iq :: stream(u16)) :: stream(s16) do
+    iq |> map(&phase/1) |> transform(0, &phase_step/2)
+  end
+
+  # d -> MPX x (FIR /4: 240 kS/s)
+  defhls mpx(d :: stream(s16)) :: stream(s18) do
+    d |> window(32) |> every(4) |> map(&mpx_tap/1)
+  end
+
+  # MPX x -> {R, L} frames at 48 kHz: the pilot PLL (its state named :pilot), FIR /5 on
+  # {L+R, L-R}, blend, matrix, de-emphasis
+  defhls stereo(x :: stream(s18)) :: stream(u32) do
+    x
+    |> transform({0, 0, 0, 0, 0, 0, 0, 0}, &pilot_pll/2, name: :pilot)
+    |> window(224) |> every(5) |> map(&stereo_tap/1)
+    |> transform({0, 0, 0}, &stereo_out/3)
+  end
+
   definstance radio do
     usb_bulk_in()
-    |> iq_pair()
-    |> window(31) |> map(&chan_tap/1)
-    |> map(&phase/1)
-    |> scan(&phase_step/2)
-    |> window(32) |> every(4) |> map(&mpx_tap/1)
-    |> scan(&pilot_pll/2)
-    |> window(224) |> every(5) |> map(&stereo_tap/1)
-    |> scan(&stereo_out/3)
-    |> scan(&level/2)
+    |> transform({0, 0}, &iq_pair/2)
+    |> channel()
+    |> discriminator()
+    |> mpx()
+    |> stereo()
+    |> transform(0, &level/2, name: :level)
     |> map(&volume/2)
     |> i2s_out()
   end
@@ -223,7 +248,7 @@ defmodule FMRadio do
 
   @doc """
   Plays the station it starts on (`@freq`) in stereo and works the controls while the
-  pipeline runs: the level and the pilot every second, mono and back to stereo, a station
+  radio runs: the level and the pilot every second, mono and back to stereo, a station
   1 MHz up and back (FMDemo, 32 s).
   """
   def demo do
@@ -251,7 +276,7 @@ defmodule FMRadio do
   in-phase level, its quadrature} (signed 16 bit each).
   """
   def pilot do
-    {_theta, _integ, _i, _q, win, _si, _sq, p} = radio(:state, :pilot_pll)
+    {_theta, _integ, _i, _q, win, _si, _sq, p} = radio(:state, :pilot)
     {win >>> 14, signed(p &&& 0xFFFF, 16), signed(p >>> 16, 16)}
   end
 

@@ -4,7 +4,7 @@
 
 AtomVM の上で動く、FM ステレオ放送の受信機です（Sipeed Tang Primer 25K）。復調の処理は、
 すべて Elixir で書かれていて、FPGA の中で動きます。RTL-SDR から来る IQ のデータは、USB ホスト
-からパイプラインを通って、I2S のアンプまで、CPU を通らずに流れます。その間、CPU の上では、
+から復調器を通って、I2S のアンプまで、CPU を通らずに流れます。その間、CPU の上では、
 Elixir のプログラムがタッチパネルの画面を動かします。
 
 [atomvm-tang25k-hls](https://github.com/elixir-hls/atomvm-tang25k-hls)（[elixir-hls](https://github.com/elixir-hls/elixir-hls) を使う）と、
@@ -23,16 +23,34 @@ Elixir のプログラムがタッチパネルの画面を動かします。
 ```elixir
 use EHLS, blocks: [EHLS.USBHost, EHLS.I2S, EHLS.RPiDisplay35], peripherals: [:lcd]
 
+# 復調器を 4 つのストリーム関数に分けて（lib/fm_radio.ex）、|> でつなぐ
+defhls channel(iq :: stream(u16)) :: stream(u16) do                   # チャネルフィルタ
+  iq |> window(31) |> map(&chan_tap/1)
+end
+
+defhls discriminator(iq :: stream(u16)) :: stream(s16) do             # CORDIC で位相を求め、その差分で FM を復調
+  iq |> map(&phase/1) |> transform(0, &phase_step/2)
+end
+
+defhls mpx(d :: stream(s16)) :: stream(s18) do                        # FIR で 1/4 に間引く: 240 kS/s の MPX
+  d |> window(32) |> every(4) |> map(&mpx_tap/1)
+end
+
+defhls stereo(x :: stream(s18)) :: stream(u32) do
+  x
+  |> transform({0, 0, 0, 0, 0, 0, 0, 0}, &pilot_pll/2, name: :pilot)  # 19 kHz のパイロットの PLL、L-R の取り出し、パイロットの測定
+  |> window(224) |> every(5) |> map(&stereo_tap/1)                    # FIR で 1/5 に間引く: 48 kHz の {L+R, L-R}
+  |> transform({0, 0, 0}, &stereo_out/3)                              # ステレオの混ぜ具合、マトリクス、デエンファシス -> {R, L}
+end
+
 definstance radio do
   usb_bulk_in()
-  |> iq_pair()                                        # IQ のバイト -> {I, Q} のワード
-  |> window(31) |> map(&chan_tap/1)                   # チャネルフィルタ
-  |> map(&phase/1) |> scan(&phase_step/2)             # CORDIC で位相を求め、その差分で FM を復調
-  |> window(32) |> every(4) |> map(&mpx_tap/1)        # FIR で 1/4 に間引く: 240 kS/s の MPX
-  |> scan(&pilot_pll/2)                               # 19 kHz のパイロットの PLL、L-R の取り出し、パイロットの測定
-  |> window(224) |> every(5) |> map(&stereo_tap/1)    # FIR で 1/5 に間引く: 48 kHz の {L+R, L-R}
-  |> scan(&stereo_out/3)                              # ステレオの混ぜ具合、マトリクス、デエンファシス -> {R, L}
-  |> scan(&level/2)                                   # ピークのレベル（読み出せる状態）
+  |> transform({0, 0}, &iq_pair/2)                    # IQ のバイト -> {I, Q} のワード
+  |> channel()
+  |> discriminator()
+  |> mpx()
+  |> stereo()
+  |> transform(0, &level/2, name: :level)             # ピークのレベル（読み出せる状態）
   |> map(&volume/2)                                   # 音量（パラメータ）
   |> i2s_out()
 end
@@ -60,7 +78,7 @@ end
 データが 1 秒止まると、パネルが RTL-SDR を開き直します。`FMDemo` は、決まった手順で動かす版です
 （モノラルとステレオの切り替え、2 つの周波数、32 秒）。
 
-コンソールからパイプラインを操作する例です。
+コンソールからラジオを操作する例です。
 
 ```elixir
 FMRadio.radio(:set, :gain, 16)      # 音量
@@ -94,7 +112,7 @@ B=deps/atomvm_tang25k/scripts                         # 最初に一度: 土台�
 $B/setup_litex.sh && $B/setup_atomvm.sh && $B/build_host.sh
 
 H=deps/atomvm_tang25k_hls/scripts
-$H/build_kernel.sh lib/fm_radio.ex lib/fm_coeffs.ex   # 10 本のカーネル。どれもシミュレーションで確かめる
+$H/build_kernel.sh lib/fm_radio.ex lib/fm_coeffs.ex   # 12 本のカーネル。どれもシミュレーションで確かめる
 $H/build_soc.sh                                       # SoC（数分。配置の設定は hls.env から）
 $H/build_atomvm.sh && $H/flash.sh vm lib              # USB ホストと液晶の NIF を含む AtomVM
 $H/build_ex.sh fm_radio FMRadio
@@ -110,7 +128,7 @@ $H/build_ex.sh fm_demo FMDemo && SECONDS_RUN=40 $H/run.sh fm_demo
 ## 試験
 
 test/ref/*.sh は、Elixir の関数を、それが置き換えた usb-rtl-sdr-tang25k の Verilog の復調器
-（test/ref/rtl/）と、ビット単位で比べます。`chan.sh`（チャネルフィルタ）、`disc.sh`（CORDIC の
+（test/ref/rtl/）と、ビット単位で比べます。ストリーム関数は CPU でリストを通します。`chan.sh`（チャネルフィルタ）、`disc.sh`（CORDIC の
 弁別器）、`fir.sh`（2 つの FIR）、`mono_out.sh`（デエンファシス）、`stereo.sh`（パイロットの PLL と
 パイロットの測定、ステレオの FIR、マトリクス）です。
 

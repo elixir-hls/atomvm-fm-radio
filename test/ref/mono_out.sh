@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# FMMono.deemphasis (Elixir, the CPU clause) against stereo_out.v of usb-rtl-sdr-tang25k
+# FMMono.deemphasis (the step function on the CPU, from the state {0, 0}) against stereo_out.v of usb-rtl-sdr-tang25k
 # (blend 0): the same N samples (a slow sine at near full scale plus noise), outputs compared.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -15,7 +15,7 @@ elixir -pa "$W/beams" -e '
   :rand.seed(:exsss, {7, 8, 9})
   xs = for i <- 0..(n - 1), do: round(1_500_000 * :math.sin(i / 37.0) + 300_000 + :rand.uniform(400_000) - 200_000)
   File.write!(Path.join(dir, "in.hex"), Enum.map(xs, &(Integer.to_string(&1 &&& 0x3FFFFF, 16) <> "\n")))
-  {ys, _} = Enum.map_reduce(xs, FMMono.deemphasis(:init), &FMMono.deemphasis/2)
+  {ys, _} = Enum.map_reduce(xs, {0, 0}, &FMMono.deemphasis/2)
   File.write!(Path.join(dir, "elixir.txt"), Enum.map(ys, &(String.pad_leading(Integer.to_string(&1 &&& 0xFFFF, 16), 4, "0") <> "\n")))
 ' "$N" "$W"
 iverilog -g2012 -o "$W/sim" mono_out_tb.v "$RTL/stereo_out.v"
