@@ -6,6 +6,15 @@ defmodule FMRadio do
   """
   use EHLS, blocks: [EHLS.USBHost, EHLS.I2S, EHLS.RPiDisplay35], peripherals: [:lcd]
 
+  # Saturation, to 16 bits and to the 8 bits of offset binary
+  defhls sat16(v :: s32) :: s16 do
+    if v > 32767, do: 32767, else: if(v < -32768, do: -32768, else: v)
+  end
+
+  defhls offset8(v :: s32) :: u8 do
+    if v > 127, do: 255, else: if(v < -128, do: 0, else: v + 128)
+  end
+
   # The volume, gain / 256 on both channels (32 = -18 dB, at most 256), a param: set while
   # playing with radio(:set, :gain, g)
   defhls volume(frame :: u32, gain :: param(u9) \\ 6) :: u32 do
@@ -54,9 +63,7 @@ defmodule FMRadio do
 
     yi = (ai + 32768) >>> 16
     yq = (aq + 32768) >>> 16
-    ui = if yi > 127, do: 255, else: if(yi < -128, do: 0, else: yi + 128)
-    uq = if yq > 127, do: 255, else: if(yq < -128, do: 0, else: yq + 128)
-    (ui <<< 8) ||| uq
+    (offset8(yi) <<< 8) ||| offset8(yq)
   end
 
   # The FM discriminator: the phase of each IQ sample by CORDIC (vectoring mode, 15
@@ -137,8 +144,8 @@ defmodule FMRadio do
       if (win &&& 0x3FFF) == 0x3FFF do
         mi = si2 >>> 14
         mq = sq2 >>> 14
-        pi = if mi > 32767, do: 32767, else: if(mi < -32768, do: -32768, else: mi)
-        pq = if mq > 32767, do: 32767, else: if(mq < -32768, do: -32768, else: mq)
+        pi = sat16(mi)
+        pq = sat16(mq)
         {0, 0, (pi &&& 0xFFFF) ||| (pq &&& 0xFFFF) <<< 16}
       else
         {si2, sq2, pilot}
@@ -176,8 +183,8 @@ defmodule FMRadio do
     yr2 = yr + (((r <<< 8) - yr) * 87 >>> 8)
     vl = yl2 >>> 8
     vr = yr2 >>> 8
-    ol = if vl > 32767, do: 32767, else: if(vl < -32768, do: -32768, else: vl)
-    orr = if vr > 32767, do: 32767, else: if(vr < -32768, do: -32768, else: vr)
+    ol = sat16(vl)
+    orr = sat16(vr)
     {(ol &&& 0xFFFF) ||| (orr &&& 0xFFFF) <<< 16, {dc2, yl2, yr2}}
   end
 
