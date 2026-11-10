@@ -36,11 +36,19 @@ defhls mpx(d :: stream(s16)) :: stream(s18) do                        # FIR で 
   d |> window(32) |> every(4) |> map(&mpx_tap/1)
 end
 
-defhls stereo(x :: stream(s18)) :: stream(u32) do
+defhls stereo(x :: stream(s18), blend :: u9) :: stream(u32) do        # blend: 0 でモノラル、256 でステレオ
   x
   |> transform({0, 0, 0, 0, 0, 0, 0, 0}, &pilot_pll/2, name: :pilot)  # 19 kHz のパイロットの PLL、L-R の取り出し、パイロットの測定
   |> window(224) |> every(5) |> map(&stereo_tap/1)                    # FIR で 1/5 に間引く: 48 kHz の {L+R, L-R}
-  |> transform({0, 0, 0}, &stereo_out/3)                              # ステレオの混ぜ具合、マトリクス、デエンファシス -> {R, L}
+  |> transform({0, 0, 0}, &stereo_out(&1, &2, blend))                # ステレオの混ぜ具合、マトリクス、デエンファシス -> {R, L}
+end
+
+definstance gain_hw(g :: u9), initial: 6 do                          # 再生中に CPU が変える値:
+  g                                                                   # ラジオの関数が読むレベル
+end
+
+definstance blend_hw(b :: u9), initial: 256 do
+  b
 end
 
 definstance radio do
@@ -49,9 +57,9 @@ definstance radio do
   |> channel()
   |> discriminator()
   |> mpx()
-  |> stereo()
+  |> stereo(blend_hw(:value))
   |> transform(0, &level/2, name: :level)             # ピークのレベル（読み出せる状態）
-  |> map(&volume/2)                                   # 音量（パラメータ）
+  |> map(&volume(&1, gain_hw(:value)))                # 音量
   |> i2s_out()
 end
 ```
@@ -81,8 +89,8 @@ end
 コンソールからラジオを操作する例です。
 
 ```elixir
-FMRadio.radio(:set, :gain, 16)      # 音量
-FMRadio.radio(:set, :blend, 0)      # モノラル（256 でステレオ）
+FMRadio.gain_hw(16)                 # 音量
+FMRadio.blend_hw(0)                 # モノラル（256 でステレオ）
 FMRadio.radio(:state, :level)       # ピークのレベル
 FMRadio.pilot()                     # 最後のパイロットの窓: {番号, パイロットの I, パイロットの Q}
 RTLSDR.tune(80_000_000)             # 別の局に切り替える
