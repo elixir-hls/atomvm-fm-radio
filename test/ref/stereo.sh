@@ -34,7 +34,7 @@ elixir -pa "$W/beams" -e '
   File.write!(Path.join(dir, "elixir_pilot.txt"), for({p, s} <- Enum.reverse(ps),
     do: "P #{String.pad_leading(Integer.to_string(p, 16), 8, "0")} #{String.pad_leading(Integer.to_string(s, 16), 2, "0")}\n"))
   # blend: its default, 256
-  ys = FMRadio.stereo(xs)
+  ys = FMRadio.stereo(xs, 256)
   File.write!(Path.join(dir, "elixir.txt"), Enum.map(ys, &(String.pad_leading(Integer.to_string(&1, 16), 8, "0") <> "\n")))
 ' "$N" "$W"
 iverilog -g2012 -I "$RTL" -o "$W/sim" stereo_tb.v "$RTL/stereo_pll.v" \

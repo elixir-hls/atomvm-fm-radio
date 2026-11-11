@@ -15,9 +15,9 @@ defmodule FMRadio do
     if v > 127, do: 255, else: if(v < -128, do: 0, else: v + 128)
   end
 
-  # The volume, gain / 256 on both channels (32 = -18 dB, at most 256), a param: set while
-  # playing with radio(:set, :gain, g)
-  defhls volume(frame :: u32, gain :: param(u9) \\ 6) :: u32 do
+  # The volume, gain / 256 on both channels (32 = -18 dB, at most 256): in the radio the
+  # level gain_hw gives, set while playing with gain_hw(g)
+  defhls volume(frame :: u32, gain :: u9) :: u32 do
     g = if gain > 256, do: 256, else: gain
     l = signed(frame &&& 0xFFFF, 16) * g >>> 8
     r = signed(frame >>> 16, 16) * g >>> 8
@@ -170,9 +170,9 @@ defmodule FMRadio do
   end
 
   # {L+R, L-R} -> a frame {R, L} (16 bits each): DC block (rounded, 2^-10), blend (0 = mono
-  # .. 256 = full stereo, a param), matrix, 50 us de-emphasis per channel, saturation.
-  # Bit-exact with stereo_out.v.
-  defhls stereo_out(sd :: {s22, s22}, st :: state({s22, s32, s32}), blend :: param(u9) \\ 256) :: u32 do
+  # .. 256 = full stereo, a level after the state), matrix, 50 us de-emphasis per channel,
+  # saturation. Bit-exact with stereo_out.v.
+  defhls stereo_out(sd :: {s22, s22}, st :: state({s22, s32, s32}), blend :: u9) :: u32 do
     {s, d} = sd
     {dc, yl, yr} = st
     dc2 = signed(dc + ((s - dc + 512) >>> 10), 22)
@@ -208,12 +208,22 @@ defmodule FMRadio do
   end
 
   # MPX x -> {R, L} frames at 48 kHz: the pilot PLL (its state named :pilot), FIR /5 on
-  # {L+R, L-R}, blend, matrix, de-emphasis
-  defhls stereo(x :: stream(s18)) :: stream(u32) do
+  # {L+R, L-R}, blend (0 = mono .. 256 = full stereo), matrix, de-emphasis
+  defhls stereo(x :: stream(s18), blend :: u9) :: stream(u32) do
     x
     |> transform({0, 0, 0, 0, 0, 0, 0, 0}, &pilot_pll/2, name: :pilot)
     |> window(224) |> every(5) |> map(&stereo_tap/1)
-    |> transform({0, 0, 0}, &stereo_out/3)
+    |> transform({0, 0, 0}, &stereo_out(&1, &2, blend))
+  end
+
+  # what the CPU changes while the radio plays: the volume and the stereo blend, levels the
+  # radio's functions read at each sample
+  definstance gain_hw(g :: u9), initial: 6 do
+    g
+  end
+
+  definstance blend_hw(b :: u9), initial: 256 do
+    b
   end
 
   definstance radio do
@@ -222,9 +232,9 @@ defmodule FMRadio do
     |> channel()
     |> discriminator()
     |> mpx()
-    |> stereo()
+    |> stereo(blend_hw(:value))
     |> transform(0, &level/2, name: :level)
-    |> map(&volume/2)
+    |> map(&volume(&1, gain_hw(:value)))
     |> i2s_out()
   end
 
@@ -257,8 +267,8 @@ defmodule FMRadio do
 
     steps = [
       {0, "#{mhz(@freq)} MHz, stereo", fn -> :ok end},
-      {8, "mono (blend 0)", fn -> radio(:set, :blend, 0) end},
-      {14, "stereo (blend 256)", fn -> radio(:set, :blend, 256) end},
+      {8, "mono (blend 0)", fn -> blend_hw(0) end},
+      {14, "stereo (blend 256)", fn -> blend_hw(256) end},
       {20, "tune #{mhz(other)} MHz", fn -> RTLSDR.tune(other) end},
       {26, "tune #{mhz(@freq)} MHz", fn -> RTLSDR.tune(@freq) end}
     ]

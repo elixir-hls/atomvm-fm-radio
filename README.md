@@ -34,11 +34,19 @@ defhls mpx(d :: stream(s16)) :: stream(s18) do                        # FIR /4: 
   d |> window(32) |> every(4) |> map(&mpx_tap/1)
 end
 
-defhls stereo(x :: stream(s18)) :: stream(u32) do
+defhls stereo(x :: stream(s18), blend :: u9) :: stream(u32) do        # blend: 0 mono .. 256 stereo
   x
   |> transform({0, 0, 0, 0, 0, 0, 0, 0}, &pilot_pll/2, name: :pilot)  # 19 kHz pilot PLL, L-R mixed down, pilot windows
   |> window(224) |> every(5) |> map(&stereo_tap/1)                    # FIR /5: {L+R, L-R} at 48 kHz
-  |> transform({0, 0, 0}, &stereo_out/3)                              # blend, matrix, de-emphasis -> {R, L}
+  |> transform({0, 0, 0}, &stereo_out(&1, &2, blend))                # blend, matrix, de-emphasis -> {R, L}
+end
+
+definstance gain_hw(g :: u9), initial: 6 do                          # what the CPU changes while it plays:
+  g                                                                   # levels the radio's functions read
+end
+
+definstance blend_hw(b :: u9), initial: 256 do
+  b
 end
 
 definstance radio do
@@ -47,9 +55,9 @@ definstance radio do
   |> channel()
   |> discriminator()
   |> mpx()
-  |> stereo()
+  |> stereo(blend_hw(:value))
   |> transform(0, &level/2, name: :level)             # peak level (readable state)
-  |> map(&volume/2)                                   # gain (param)
+  |> map(&volume(&1, gain_hw(:value)))                # gain
   |> i2s_out()
 end
 ```
@@ -78,8 +86,8 @@ stops for a second the panel opens the RTL-SDR again. `FMDemo` is a scripted run
 The radio from the console:
 
 ```elixir
-FMRadio.radio(:set, :gain, 16)      # volume
-FMRadio.radio(:set, :blend, 0)      # mono (256: stereo)
+FMRadio.gain_hw(16)                 # volume
+FMRadio.blend_hw(0)                 # mono (256: stereo)
 FMRadio.radio(:state, :level)       # peak level
 FMRadio.pilot()                     # the last pilot window: {count, pilot I, pilot Q}
 RTLSDR.tune(80_000_000)             # another station

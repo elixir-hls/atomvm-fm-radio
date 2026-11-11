@@ -52,7 +52,7 @@ defmodule FMPanel do
     :lcd.init()
     buttons = layout()
     for {b, i} <- :lists.zip(buttons, :lists.seq(0, 7)), do: draw_button(b, i, false)
-    FMRadio.radio(:set, :gain, elem(@gains, @default_vol))
+    FMRadio.gain_hw(elem(@gains, @default_vol))
 
     st = %{freq: freq, vol: @default_vol, stereo: false, blend: FMStereo.new(), seq: nil,
            buttons: buttons, pressed: nil, repeat: 0, age: 1000, level: nil, sn: nil,
@@ -119,7 +119,7 @@ defmodule FMPanel do
 
   defp act(st, {:vol, step}) do
     v = min(15, max(0, st.vol + step))
-    FMRadio.radio(:set, :gain, elem(@gains, v))
+    FMRadio.gain_hw(elem(@gains, v))
     %{st | vol: v}
   end
 
@@ -164,7 +164,7 @@ defmodule FMPanel do
 
       true ->
         b = FMStereo.window(st.blend, pi, pq)
-        if b.blend != st.blend.blend, do: FMRadio.radio(:set, :blend, b.blend)
+        if b.blend != st.blend.blend, do: FMRadio.blend_hw(b.blend)
         stereo = b.blend >= 128
 
         if stereo != st.stereo,
