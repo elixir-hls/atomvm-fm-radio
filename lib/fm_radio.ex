@@ -262,7 +262,7 @@ defmodule FMRadio do
   defp play_at(freq) do
     IO.puts("fm: open RTL-SDR at #{mhz(freq)} MHz: #{inspect(open(freq, 3))}")
     # the level stage on the CPU
-    pid = radio(:cpu_start, batch: 8192, chunk: 1024)
+    pid = radio(:cpu_start, batch: 8192)
     :erlang.put(:cpu_driver, pid)
     :ok = RTLSDR.start()
   end

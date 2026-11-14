@@ -228,7 +228,7 @@ defmodule FMPanel do
     line = status_line(st)
     shown =
       if Map.get(shown, :vol) != st.vol or st.status_due do
-        field(shown, :line, line, fn -> text(16, 100, line, @fg, @bg, 1) end)
+        field(shown, :line, line, fn -> :lcd.text(16, 100, line, @fg, @bg, 1) end)
       else
         shown
       end
@@ -245,26 +245,16 @@ defmodule FMPanel do
     end
   end
 
-  # a text one character at a time, with a pause between: each call of the LCD's NIF is short, so the radio's CPU stage
-  # (its driver feeds the I2S, whose FIFO holds 64 ms) gets its turn in between
-  defp text(x, y, <<c, rest::binary>>, fg, bg, scale) do
-    x = :lcd.text(x, y, <<c>>, fg, bg, scale)
-    :timer.sleep(1)
-    text(x, y, rest, fg, bg, scale)
-  end
-
-  defp text(x, _y, <<>>, _fg, _bg, _scale), do: x
-
   defp draw_freq(f) do
-    x = text(16, 16, pad(mhz(f), 5), @fg, @bg, 2)
-    text(x + 8, 48, "MHz", @dim, @bg, 1)
+    x = :lcd.text(16, 16, pad(mhz(f), 5), @fg, @bg, 2)
+    :lcd.text(x + 8, 48, "MHz", @dim, @bg, 1)
     name = for({hz, n} <- @stations, div(hz, 100_000) == div(f, 100_000), do: n)
     # right-aligned, 12 characters (clears the old name)
-    text(@lcd_w - 16 - 12 * 16, 56, pad(Enum.join(name), 12), @accent, @bg, 1)
+    :lcd.text(@lcd_w - 16 - 12 * 16, 56, pad(Enum.join(name), 12), @accent, @bg, 1)
   end
 
-  defp draw_stereo(true), do: text(@lcd_w - 16 - 6 * 16, 16, "STEREO", @accent, @bg, 1)
-  defp draw_stereo(false), do: text(@lcd_w - 16 - 6 * 16, 16, "  MONO", @dim, @bg, 1)
+  defp draw_stereo(true), do: :lcd.text(@lcd_w - 16 - 6 * 16, 16, "STEREO", @accent, @bg, 1)
+  defp draw_stereo(false), do: :lcd.text(@lcd_w - 16 - 6 * 16, 16, "  MONO", @dim, @bg, 1)
 
   defp status_line(st) do
     lvl =
@@ -284,7 +274,7 @@ defmodule FMPanel do
     bg = if down, do: @btn_down, else: @btn
     label = Enum.at(@labels, i)
     :lcd.fill(x, y, w, h, bg)
-    text(x + div(w - byte_size(label) * 16, 2), y + div(h - 32, 2), label, @fg, bg, 1)
+    :lcd.text(x + div(w - byte_size(label) * 16, 2), y + div(h - 32, 2), label, @fg, bg, 1)
   end
 
   defp mhz(f) do
