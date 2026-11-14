@@ -182,7 +182,7 @@ defmodule FMPanel do
     if age < 1000 do
       %{st | age: age}
     else
-      %{st | age: 0, level: FMRadio.radio(:state, :level), sn: st.blend.db, status_due: true}
+      %{st | age: 0, level: 0, sn: st.blend.db, status_due: true}
       |> watchdog()
     end
   end
@@ -209,9 +209,9 @@ defmodule FMPanel do
                 "NAKs +#{naks2 - naks} in 100 ms): open again")
       IO.puts("panel:   usb debug #{inspect(RTLSDR.debug())} then #{inspect(RTLSDR.debug())}")
       RTLSDR.stop()
-      FMRadio.radio(:stop)
+      FMRadio.radio__pre(:stop)
       r = FMRadio.open(st.freq, 3)
-      FMRadio.radio(:start)
+      FMRadio.radio__pre(:start)
       RTLSDR.start()
       IO.puts("panel:   open #{inspect(r)}")
       %{st | pkts: nil}

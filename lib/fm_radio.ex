@@ -26,7 +26,7 @@ defmodule FMRadio do
 
   # The peak level of the audio (decaying by 2^-12 per sample, ~85 ms): the frames pass
   # through, the state is the level; placed as transform(0, &level/2, name: :level),
-  # radio(:state, :level) reads it while playing
+  # radio__pre(:state, :level) reads it while playing
   defhls level(frame :: u32, peak :: state(u16)) :: u32 do
     v = signed(frame &&& 0xFFFF, 16)
     a = if v < 0, do: -v, else: v
@@ -226,14 +226,17 @@ defmodule FMRadio do
     b
   end
 
-  definstance radio do
+  # the level on the CPU (its C, in a driver process between radio__pre and radio__post, started
+  # by play_at); the tuner cannot wait, so what the CPU does not take in time is dropped. No
+  # circuit holds the level's state then, so nothing reads it.
+  definstance radio, overflow: :drop, buffer: 2048 do
     usb_bulk_in()
     |> transform({0, 0}, &iq_pair/2)
     |> channel()
     |> discriminator()
     |> mpx()
     |> stereo(blend_hw(:value))
-    |> transform(0, &level/2, name: :level)
+    |> transform(0, &level/2, on: :cpu)
     |> map(&volume(&1, gain_hw(:value)))
     |> i2s_out()
   end
@@ -253,6 +256,9 @@ defmodule FMRadio do
 
   defp play_at(freq) do
     IO.puts("fm: open RTL-SDR at #{mhz(freq)} MHz: #{inspect(open(freq, 3))}")
+    # the level stage on the CPU
+    pid = radio(:cpu_start, batch: 8192)
+    :erlang.put(:cpu_driver, pid)
     :ok = RTLSDR.start()
   end
 
@@ -277,7 +283,7 @@ defmodule FMRadio do
     {pkts, naks, errs} = RTLSDR.stats()
     IO.puts("fm: bulk packets #{pkts}, naks #{naks}, errors #{errs}")
     RTLSDR.stop()
-    radio(:stop)
+    radio__pre(:stop)
     :ok
   end
 
@@ -286,7 +292,7 @@ defmodule FMRadio do
   in-phase level, its quadrature} (signed 16 bit each).
   """
   def pilot do
-    {_theta, _integ, _i, _q, win, _si, _sq, p} = radio(:state, :pilot)
+    {_theta, _integ, _i, _q, win, _si, _sq, p} = radio__pre(:state, :pilot)
     {win >>> 14, signed(p &&& 0xFFFF, 16), signed(p >>> 16, 16)}
   end
 
@@ -323,7 +329,7 @@ defmodule FMRadio do
 
     :timer.sleep(1000)
     {seq, pilot_i, pilot_q} = pilot()
-    IO.puts("fm: #{t + 1} s: level #{radio(:state, :level)}, pilot window #{seq}: #{pilot_i} / #{pilot_q}")
+    IO.puts("fm: #{t + 1} s: pilot window #{seq}: #{pilot_i} / #{pilot_q}, cpu #{inspect(radio(:cpu_stats, :erlang.get(:cpu_driver)))}")
     play(t + 1, stop, steps)
   end
 end
