@@ -4,7 +4,7 @@ defmodule FMRadio do
   demodulator to the I2S amplifiers inside the FPGA; Elixir sets the RTL-SDR up, starts /
   stops the instance `radio` and controls it while it runs (tuning, volume, level).
   """
-  use EHLS, blocks: [EHLS.USBHost, EHLS.I2S, EHLS.RPiDisplay35], peripherals: [:lcd]
+  use EHLS, blocks: [EHLS.USBHost, {EHLS.I2S, wait: true}, EHLS.RPiDisplay35], peripherals: [:lcd]
 
   # Saturation, to 16 bits and to the 8 bits of offset binary
   defhls sat16(v :: s32) :: s16 do
