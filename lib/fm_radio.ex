@@ -229,7 +229,7 @@ defmodule FMRadio do
   # the level on the CPU (its C, in a driver process between radio__pre and radio__post, started
   # by play_at); the tuner cannot wait, so what the CPU does not take in time is dropped. No
   # circuit holds the level's state then, so nothing reads it.
-  definstance radio, overflow: :drop, buffer: 2048 do
+  definstance radio, overflow: :drop, buffer: 512 do
     usb_bulk_in()
     |> transform({0, 0}, &iq_pair/2)
     |> channel()
@@ -254,10 +254,15 @@ defmodule FMRadio do
     FMPanel.run(@freq)
   end
 
+  # what i2s_out's FIFO did so far (EHLS.I2S registers)
+  defp i2s do
+    for r <- [:underruns, :repeats, :drops, :overruns, :level], do: {r, :hwstream.reg_read(:hw_kernels.reg(:hls_i2s, r))}
+  end
+
   defp play_at(freq) do
     IO.puts("fm: open RTL-SDR at #{mhz(freq)} MHz: #{inspect(open(freq, 3))}")
     # the level stage on the CPU
-    pid = radio(:cpu_start, batch: 8192)
+    pid = radio(:cpu_start, batch: 8192, chunk: 1024)
     :erlang.put(:cpu_driver, pid)
     :ok = RTLSDR.start()
   end
@@ -329,7 +334,7 @@ defmodule FMRadio do
 
     :timer.sleep(1000)
     {seq, pilot_i, pilot_q} = pilot()
-    IO.puts("fm: #{t + 1} s: pilot window #{seq}: #{pilot_i} / #{pilot_q}, cpu #{inspect(radio(:cpu_stats, :erlang.get(:cpu_driver)))}")
+    IO.puts("fm: #{t + 1} s: pilot window #{seq}: #{pilot_i} / #{pilot_q}, cpu #{inspect(radio(:cpu_stats, :erlang.get(:cpu_driver)))}, i2s #{inspect(i2s())}")
     play(t + 1, stop, steps)
   end
 end
