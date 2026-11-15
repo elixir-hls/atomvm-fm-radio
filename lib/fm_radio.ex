@@ -189,7 +189,7 @@ defmodule FMRadio do
     {(ol &&& 0xFFFF) ||| (orr &&& 0xFFFF) <<< 16, {dc2, yl2, yr2}}
   end
 
-  # The demodulator in four stream functions, each one compared with the Verilog it replaces
+  # The demodulator in four stream functions, each one compared with the reference Verilog
   # (test/ref/*.sh): on the CPU they take a list and give a list, from the initial states.
 
   # signed {I, Q} words -> the channel filter's output (offset binary)
