@@ -23,7 +23,7 @@ use EHLS, blocks: [EHLS.USBHost, EHLS.I2S, EHLS.RPiDisplay35], peripherals: [:lc
 
 # the demodulator in four stream functions (lib/fm_radio.ex), joined with |>
 defhls channel(iq :: stream(u16)) :: stream(u16) do                   # channel filter
-  iq |> window(31) |> map(&chan_tap/1)
+  iq |> chunk_every(31, 1, :discard) |> map(&chan_tap/1)
 end
 
 defhls discriminator(iq :: stream(u16)) :: stream(s16) do             # CORDIC phase, its difference: FM
@@ -31,13 +31,13 @@ defhls discriminator(iq :: stream(u16)) :: stream(s16) do             # CORDIC p
 end
 
 defhls mpx(d :: stream(s16)) :: stream(s18) do                        # FIR /4: MPX at 240 kS/s
-  d |> window(32) |> every(4) |> map(&mpx_tap/1)
+  d |> chunk_every(32, 4, :discard) |> map(&mpx_tap/1)
 end
 
 defhls stereo(x :: stream(s18), blend :: u9) :: stream(u32) do        # blend: 0 mono .. 256 stereo
   x
   |> transform({0, 0, 0, 0, 0, 0, 0, 0}, &pilot_pll/2, name: :pilot)  # 19 kHz pilot PLL, L-R mixed down, pilot windows
-  |> window(224) |> every(5) |> map(&stereo_tap/1)                    # FIR /5: {L+R, L-R} at 48 kHz
+  |> chunk_every(225, 5, :discard) |> map(&stereo_tap/1)              # FIR /5: {L+R, L-R} at 48 kHz
   |> transform({0, 0, 0}, &stereo_out(&1, &2, blend))                # blend, matrix, de-emphasis -> {R, L}
 end
 

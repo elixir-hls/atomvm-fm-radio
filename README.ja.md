@@ -25,7 +25,7 @@ use EHLS, blocks: [EHLS.USBHost, EHLS.I2S, EHLS.RPiDisplay35], peripherals: [:lc
 
 # 復調器を 4 つのストリーム関数に分けて（lib/fm_radio.ex）、|> でつなぐ
 defhls channel(iq :: stream(u16)) :: stream(u16) do                   # チャネルフィルタ
-  iq |> window(31) |> map(&chan_tap/1)
+  iq |> chunk_every(31, 1, :discard) |> map(&chan_tap/1)
 end
 
 defhls discriminator(iq :: stream(u16)) :: stream(s16) do             # CORDIC で位相を求め、その差分で FM を復調
@@ -33,13 +33,13 @@ defhls discriminator(iq :: stream(u16)) :: stream(s16) do             # CORDIC �
 end
 
 defhls mpx(d :: stream(s16)) :: stream(s18) do                        # FIR で 1/4 に間引く: 240 kS/s の MPX
-  d |> window(32) |> every(4) |> map(&mpx_tap/1)
+  d |> chunk_every(32, 4, :discard) |> map(&mpx_tap/1)
 end
 
 defhls stereo(x :: stream(s18), blend :: u9) :: stream(u32) do        # blend: 0 でモノラル、256 でステレオ
   x
   |> transform({0, 0, 0, 0, 0, 0, 0, 0}, &pilot_pll/2, name: :pilot)  # 19 kHz のパイロットの PLL、L-R の取り出し、パイロットの測定
-  |> window(224) |> every(5) |> map(&stereo_tap/1)                    # FIR で 1/5 に間引く: 48 kHz の {L+R, L-R}
+  |> chunk_every(225, 5, :discard) |> map(&stereo_tap/1)              # FIR で 1/5 に間引く: 48 kHz の {L+R, L-R}
   |> transform({0, 0, 0}, &stereo_out(&1, &2, blend))                # ステレオの混ぜ具合、マトリクス、デエンファシス -> {R, L}
 end
 
