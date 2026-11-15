@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# The FIRs as placed, window |> every |> map: the stream functions FMRadio.mpx (mpx_tap) and
+# The FIRs as placed, chunk_every |> map: the stream functions FMRadio.mpx (mpx_tap) and
 # FMMono.audio (audio_tap) on the CPU against fir_dec.v of usb-rtl-sdr-tang25k with the same
-# parameters: N random samples at full scale, outputs compared.
+# parameters: N random samples at full scale, outputs compared. fir_dec.v starts from a history
+# of zeros, a chunk from its first whole one: the Elixir outputs are the Verilog's last ones.
 set -euo pipefail
 cd "$(dirname "$0")"
 source ./common.sh
@@ -29,8 +30,9 @@ for cfg in "FMRadio mpx   16 18 32  4 3 15 1 6 1" "FMMono  audio 18 22 224 5 4 1
     iverilog -g2012 -DIW=$IW -DOW=$OW -DTAPS=$TAPS -DDEC=$DEC -DPHASE=$PHASE -DSH=$SH -DSAT=$SAT -DAW=$AW \
         -DTABLE=$TABLE -I "$RTL" -o "$D/sim" fir_tb.v "$RTL/fir_dec.v"
     (cd "$D" && vvp -n sim +N="$N" | grep -E "^[0-9a-f]+$" | tr "a-f" "A-F") > "$D/verilog.txt"
-    if cmp -s "$D/elixir.txt" "$D/verilog.txt"; then
-        echo "$FUN: $N samples, $(wc -l < "$D/verilog.txt") outputs, Elixir = Verilog"
+    E=$(wc -l < "$D/elixir.txt"); V=$(wc -l < "$D/verilog.txt")
+    if [ "$E" -gt 0 ] && tail -n "$E" "$D/verilog.txt" | cmp -s "$D/elixir.txt" -; then
+        echo "$FUN: $N samples, $E outputs (Verilog $V, from zeros before the first chunk), Elixir = Verilog"
     else
         echo "$FUN: MISMATCH"; diff "$D/elixir.txt" "$D/verilog.txt" | head -6; exit 1
     fi

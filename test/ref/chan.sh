@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# FMRadio.channel (the stream function window(31) |> map(&chan_tap/1), on the CPU) on
-# iq_pair's signed {I, Q} against chan_fir.v of usb-rtl-sdr-tang25k: N {I, Q}
+# FMRadio.channel (the stream function chunk_every(31, 1, :discard) |> map(&chan_tap/1), on
+# the CPU) on iq_pair's signed {I, Q} against chan_fir.v of usb-rtl-sdr-tang25k: N {I, Q}
 # samples (a strong rotating phasor, random words, the corners), the output words compared.
+# chan_fir.v starts from a history of zeros, a chunk from its first 31 samples: the Elixir
+# outputs are the Verilog's last ones.
 set -euo pipefail
 cd "$(dirname "$0")"
 source ./common.sh
@@ -30,8 +32,9 @@ elixir -pa "$W/beams" -e '
 ' "$N" "$W"
 iverilog -g2012 -I "$RTL" -o "$W/sim" chan_tb.v "$RTL/chan_fir.v"
 (cd "$W" && vvp -n sim +N="$N" | grep -E "^[0-9a-f]{4}$" | tr "a-f" "A-F") > "$W/verilog.txt"
-if cmp -s "$W/elixir.txt" "$W/verilog.txt"; then
-    echo "chan: $N samples, Elixir = Verilog"
+E=$(wc -l < "$W/elixir.txt"); V=$(wc -l < "$W/verilog.txt")
+if [ "$E" -gt 0 ] && tail -n "$E" "$W/verilog.txt" | cmp -s "$W/elixir.txt" -; then
+    echo "chan: $N samples, $E outputs (Verilog $V, from zeros before the first chunk), Elixir = Verilog"
 else
     echo "chan: MISMATCH"; diff "$W/elixir.txt" "$W/verilog.txt" | head; exit 1
 fi

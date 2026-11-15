@@ -3,7 +3,10 @@
 # pilot_pll's state (the step function called directly, for the pilot windows) against the stereo end of fm_stereo.v of usb-rtl-sdr-tang25k (stereo_pll, fir_dec x 2,
 # stereo_out at blend 256): N MPX samples at 240 kS/s (L = 1 kHz, R = 1.7 kHz, the 38 kHz
 # subcarrier, the 19 kHz pilot, noise), the {R, L} output frames and the pilot windows (2^14
-# samples each: pilot_i / pilot_q / count) compared.
+# samples each: pilot_i / pilot_q / count) compared. fir_dec.v starts from a history of zeros,
+# and stereo_out goes on from what comes before: the Verilog's case is built from the same
+# functions with 220 zero elements before the chunks (the first output on the 5th sample, as
+# fir_dec.v's PHASE 4), and FMRadio.stereo is checked to be these functions joined.
 set -euo pipefail
 cd "$(dirname "$0")"
 source ./common.sh
@@ -34,7 +37,11 @@ elixir -pa "$W/beams" -e '
   File.write!(Path.join(dir, "elixir_pilot.txt"), for({p, s} <- Enum.reverse(ps),
     do: "P #{String.pad_leading(Integer.to_string(p, 16), 8, "0")} #{String.pad_leading(Integer.to_string(s, 16), 2, "0")}\n"))
   # blend: its default, 256
-  ys = FMRadio.stereo(xs, 256)
+  alias EHLS.Stream, as: S
+  pl = S.transform(xs, {0, 0, 0, 0, 0, 0, 0, 0}, &FMRadio.pilot_pll/2)
+  rest = fn s -> s |> S.chunk_every(225, 5, :discard) |> S.map(&FMRadio.stereo_tap/1) |> S.transform({0, 0, 0}, &FMRadio.stereo_out(&1, &2, 256)) |> Enum.to_list() end
+  unless FMRadio.stereo(xs, 256) == rest.(pl), do: (IO.puts("stereo: FMRadio.stereo is not its functions joined"); System.halt(1))
+  ys = rest.(Stream.concat(List.duplicate({0, 0}, 220), pl))
   File.write!(Path.join(dir, "elixir.txt"), Enum.map(ys, &(String.pad_leading(Integer.to_string(&1, 16), 8, "0") <> "\n")))
 ' "$N" "$W"
 iverilog -g2012 -I "$RTL" -o "$W/sim" stereo_tb.v "$RTL/stereo_pll.v" \
