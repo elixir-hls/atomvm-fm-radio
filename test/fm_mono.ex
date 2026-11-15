@@ -15,7 +15,7 @@ defmodule FMMono do
   # L+R at 48 kHz (s22 in a word) -> a mono frame: DC block (rounded, 2^-10), 50 us
   # de-emphasis (y += ((v << 8) - y) * 87 >> 8), saturation to 16 bits. Bit-exact with
   # stereo_out.v at blend 0 (test/ref/mono_out.sh).
-  defhls deemphasis(s :: s32, st :: state({s32, s32})) :: u32 do
+  defhls deemphasis(s :: s32, st :: {s32, s32}) :: {u32, {s32, s32}} do
     {dc, y} = st
     dc2 = dc + ((s - dc + 512) >>> 10)
     sp = s - dc2

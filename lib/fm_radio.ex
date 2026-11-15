@@ -27,7 +27,7 @@ defmodule FMRadio do
   # The peak level of the audio (decaying by 2^-12 per sample, ~85 ms): the frames pass
   # through, the state is the level; placed as transform(0, &level/2, name: :level),
   # radio(:state, :level) reads it while playing
-  defhls level(frame :: u32, peak :: state(u16)) :: u32 do
+  defhls level(frame :: u32, peak :: u16) :: {u32, u16} do
     v = signed(frame &&& 0xFFFF, 16)
     a = if v < 0, do: -v, else: v
     decayed = peak - (peak >>> 12)
@@ -36,10 +36,10 @@ defmodule FMRadio do
 
   # IQ bytes (I, Q, I, Q, ...; offset binary) -> one {I[15:8], Q[7:0]} word per sample, the
   # bytes as signed values (so that a zero-filled history means silence): every other byte
-  # produces nothing (emit / skip)
-  defhls iq_pair(b :: u8, st :: state({u8, u8})) :: emit(u16) do
+  # produces nothing (an empty list)
+  defhls iq_pair(b :: u8, st :: {u8, u8}) :: {[u16], {u8, u8}} do
     {have_i, i} = st
-    if have_i == 1, do: {emit((i <<< 8 ||| b) ^^^ 0x8080), {0, 0}}, else: {skip(), {1, b}}
+    if have_i == 1, do: {[(i <<< 8 ||| b) ^^^ 0x8080], {0, 0}}, else: {[], {1, b}}
   end
 
   # The channel filter (31 taps, 120 kHz low-pass, symmetric) on I and Q: signed {I, Q} in,
@@ -97,7 +97,7 @@ defmodule FMRadio do
     z
   end
 
-  defhls phase_step(ph :: u16, prev :: state(u16)) :: s16 do
+  defhls phase_step(ph :: u16, prev :: u16) :: {s16, u16} do
     {signed(ph - prev, 16), ph}
   end
 
@@ -123,7 +123,7 @@ defmodule FMRadio do
   # with stereo_pll.v (test/ref/stereo.sh). The sums fit 32 bits: |i_lp|, |q_lp| < 2^17.
   @sin FMCoeffs.sin()
 
-  defhls pilot_pll(x :: s18, st :: state({u32, s32, s24, s24, u32, s32, s32, u32})) :: {s18, s20} do
+  defhls pilot_pll(x :: s18, st :: {u32, s32, s24, s24, u32, s32, s32, u32}) :: {{s18, s20}, {u32, s32, s24, s24, u32, s32, s32, u32}} do
     {theta, integ, i_lp, q_lp, win, si, sq, pilot} = st
     a = theta >>> 22
     s1 = table(@sin, a)
@@ -172,7 +172,7 @@ defmodule FMRadio do
   # {L+R, L-R} -> a frame {R, L} (16 bits each): DC block (rounded, 2^-10), blend (0 = mono
   # .. 256 = full stereo, a level after the state), matrix, 50 us de-emphasis per channel,
   # saturation. Bit-exact with stereo_out.v.
-  defhls stereo_out(sd :: {s22, s22}, st :: state({s22, s32, s32}), blend :: u9) :: u32 do
+  defhls stereo_out(sd :: {s22, s22}, st :: {s22, s32, s32}, blend :: u9) :: {u32, {s22, s32, s32}} do
     {s, d} = sd
     {dc, yl, yr} = st
     dc2 = signed(dc + ((s - dc + 512) >>> 10), 22)
