@@ -43,18 +43,18 @@ defmodule FMRadio do
   end
 
   # The channel filter (31 taps, 120 kHz low-pass, symmetric) on I and Q: signed {I, Q} in,
-  # offset binary out (rounded, saturated to 8 bits). Two symmetric pairs per loop iteration.
-  # Bit-exact with chan_fir.v (test/ref/chan.sh).
+  # offset binary out (rounded, saturated to 8 bits). Two symmetric pairs per loop iteration;
+  # tap k on the k-th newest of the chunk. Bit-exact with chan_fir.v (test/ref/chan.sh).
   @chan FMCoeffs.chan()
 
-  defhls chan_tap(w :: window(u16, 31)) :: u16 do
+  defhls chan_tap(w :: list(u16, 31)) :: u16 do
     {ai, aq} =
       for j <- 0..7, reduce: {0, 0} do
         acc ->
           Enum.reduce(0..1, acc, fn u, {ai, aq} ->
             k = 2 * j + u
-            a = w[k]
-            b = w[30 - k]
+            a = Enum.at(w, 30 - k)
+            b = Enum.at(w, k)
             c = table(@chan, k)
             # pairs (k, 30 - k); the centre tap (15) once
             {bi, bq} = if k == 15, do: {0, 0}, else: {signed(b >>> 8, 8), signed(b &&& 0xFF, 8)}
@@ -104,13 +104,14 @@ defmodule FMRadio do
   @fir1 FMCoeffs.fir1()
   @fir2 FMCoeffs.fir2()
 
-  # The FIRs as pure functions of a window of the stream (w[0] the newest element);
-  # window(n) |> every(k) |> map(&f/1) places each one as a time-multiplexed kernel (a ring
-  # buffer in a memory, the taps in a loop). Bit-exact with fir_dec.v (test/ref/fir.sh).
+  # The FIRs as pure functions of a chunk of the stream (Enum.at(w, i), 0 the oldest; tap k on
+  # the k-th newest); chunk_every(n, k, :discard) |> map(&f/1) places each one as a
+  # time-multiplexed kernel (a ring buffer in a memory, the taps in a loop). Bit-exact with
+  # fir_dec.v (test/ref/fir.sh).
 
   # d (s16, 960 kS/s) -> MPX x (s18): 32 taps, saturated (every 4th: 240 kS/s)
-  defhls mpx_tap(w :: window(s16, 32)) :: s18 do
-    v = Enum.sum(for k <- 0..31, do: w[k] * table(@fir1, k)) >>> 15
+  defhls mpx_tap(w :: list(s16, 32)) :: s18 do
+    v = Enum.sum(for k <- 0..31, do: Enum.at(w, 31 - k) * table(@fir1, k)) >>> 15
     if v > 131_071, do: 131_071, else: if(v < -131_072, do: -131_072, else: v)
   end
 
@@ -156,12 +157,13 @@ defmodule FMRadio do
   end
 
   # {x, m} (240 kS/s) -> {L+R, L-R} (s22 each, 48 kHz): FIR2 (224 taps, every 5th) on both, in
-  # one loop (two buffer reads and one coefficient per tap)
-  defhls stereo_tap(w :: window({s18, s20}, 224)) :: {s22, s22} do
+  # one loop (two buffer reads and one coefficient per tap). A chunk of 225, its oldest without a
+  # tap: the outputs fall on the 5th sample of each 5, as in fir_dec.v (PHASE 4)
+  defhls stereo_tap(w :: list({s18, s20}, 225)) :: {s22, s22} do
     {s, d} =
       for k <- 0..223, reduce: {0, 0} do
         {s, d} ->
-          {x, m} = w[k]
+          {x, m} = Enum.at(w, 224 - k)
           c = table(@fir2, k)
           {signed(s + x * c, 44), signed(d + m * c, 46)}
       end
@@ -194,7 +196,7 @@ defmodule FMRadio do
 
   # signed {I, Q} words -> the channel filter's output (offset binary)
   defhls channel(iq :: stream(u16)) :: stream(u16) do
-    iq |> window(31) |> map(&chan_tap/1)
+    iq |> chunk_every(31, 1, :discard) |> map(&chan_tap/1)
   end
 
   # {I, Q} (offset binary) -> the instantaneous frequency d (960 kS/s)
@@ -204,7 +206,7 @@ defmodule FMRadio do
 
   # d -> MPX x (FIR /4: 240 kS/s)
   defhls mpx(d :: stream(s16)) :: stream(s18) do
-    d |> window(32) |> every(4) |> map(&mpx_tap/1)
+    d |> chunk_every(32, 4, :discard) |> map(&mpx_tap/1)
   end
 
   # MPX x -> {R, L} frames at 48 kHz: the pilot PLL (its state named :pilot), FIR /5 on
@@ -212,7 +214,7 @@ defmodule FMRadio do
   defhls stereo(x :: stream(s18), blend :: u9) :: stream(u32) do
     x
     |> transform({0, 0, 0, 0, 0, 0, 0, 0}, &pilot_pll/2, name: :pilot)
-    |> window(224) |> every(5) |> map(&stereo_tap/1)
+    |> chunk_every(225, 5, :discard) |> map(&stereo_tap/1)
     |> transform({0, 0, 0}, &stereo_out(&1, &2, blend))
   end
 
