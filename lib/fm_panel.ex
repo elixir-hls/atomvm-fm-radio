@@ -9,6 +9,9 @@ defmodule FMPanel do
       [ -1.0 ] [ -0.1 ] [ +0.1 ] [ +1.0 ]      tuning, MHz (76.0 .. 95.0, wraps around)
       [ VOL- ] [ VOL+ ] [ <ST  ] [  ST> ]      volume, previous / next station of the Kanto list
 
+  Touching STEREO / MONO forces mono (`[MONO]`, blend 0) and touching it again lets the
+  pilot set the blend, to hear the two one after the other.
+
   One process, `run/1`, owns the radio's controls: every 50 ms it reads the touch panel,
   acts on a press (tuning and volume repeat while held), reads the pilot PLL's window (a new
   one every 68 ms: FMStereo sets the stereo blend from it; STEREO while the blend is at
@@ -54,7 +57,7 @@ defmodule FMPanel do
     for {b, i} <- :lists.zip(buttons, :lists.seq(0, 7)), do: draw_button(b, i, false)
     FMRadio.gain_hw(elem(@gains, @default_vol))
 
-    st = %{freq: freq, vol: @default_vol, stereo: false, blend: FMStereo.new(), seq: nil,
+    st = %{freq: freq, vol: @default_vol, stereo: false, mono: false, blend: FMStereo.new(), seq: nil,
            buttons: buttons, pressed: nil, repeat: 0, age: 1000, level: nil, sn: nil,
            status_due: false, pkts: nil, errs: nil, shown: %{}}
 
@@ -79,32 +82,47 @@ defmodule FMPanel do
   defp touch(st) do
     b =
       case :lcd.touch() do
-        {x, y} -> hit(st.buttons, x, y, 0)
+        {x, y} -> if stereo_area?(x, y), do: :mono, else: hit(st.buttons, x, y, 0)
         false -> nil
       end
 
     cond do
       b != st.pressed ->
-        if st.pressed != nil, do: draw_button(Enum.at(st.buttons, st.pressed), st.pressed, false)
+        if is_integer(st.pressed), do: draw_button(Enum.at(st.buttons, st.pressed), st.pressed, false)
         st = %{st | pressed: b, repeat: @repeat_first_ms}
-        if b != nil do
-          # act first, then draw the button: drawn just before a tune, the tuner's PLL lock
-          # bit read false every time
-          st = act(st, Enum.at(@actions, b))
-          draw_button(Enum.at(st.buttons, b), b, true)
-          st
-        else
-          st
+        cond do
+          b == :mono ->
+            mono(st, not st.mono)
+
+          b != nil ->
+            # act first, then draw the button: drawn just before a tune, the tuner's PLL lock
+            # bit read false every time
+            st = act(st, Enum.at(@actions, b))
+            draw_button(Enum.at(st.buttons, b), b, true)
+            st
+
+          true ->
+            st
         end
 
       # tuning and volume repeat while held (not the station list)
-      b != nil and b < 6 ->
+      is_integer(b) and b < 6 ->
         r = st.repeat - @tick_ms
         if r <= 0, do: act(%{st | repeat: @repeat_ms}, Enum.at(@actions, b)), else: %{st | repeat: r}
 
       true ->
         st
     end
+  end
+
+  # the STEREO / MONO indicator, top right
+  defp stereo_area?(x, y), do: x >= @lcd_w - 16 - 7 * 16 and y < 52
+
+  # forced mono: blend 0 whatever the pilot says; off, the blend the pilot last set
+  defp mono(st, on) do
+    FMRadio.blend_hw(if on, do: 0, else: st.blend.blend)
+    IO.puts("panel: #{if on, do: "mono (forced)", else: "stereo from the pilot (blend #{st.blend.blend})"}")
+    %{st | mono: on}
   end
 
   defp hit([], _x, _y, _i), do: nil
@@ -164,7 +182,7 @@ defmodule FMPanel do
 
       true ->
         b = FMStereo.window(st.blend, pi, pq)
-        if b.blend != st.blend.blend, do: FMRadio.blend_hw(b.blend)
+        if b.blend != st.blend.blend and not st.mono, do: FMRadio.blend_hw(b.blend)
         stereo = b.blend >= 128
 
         if stereo != st.stereo,
@@ -223,7 +241,7 @@ defmodule FMPanel do
   defp redraw(st) do
     shown = st.shown
     shown = field(shown, :freq, div(st.freq, 100_000), fn -> draw_freq(st.freq) end)
-    shown = field(shown, :stereo, st.stereo, fn -> draw_stereo(st.stereo) end)
+    shown = field(shown, :stereo, {st.mono, st.stereo}, fn -> draw_stereo(if st.mono, do: :mono, else: st.stereo) end)
 
     line = status_line(st)
     shown =
@@ -253,6 +271,7 @@ defmodule FMPanel do
     :lcd.text(@lcd_w - 16 - 12 * 16, 56, pad(Enum.join(name), 12), @accent, @bg, 1)
   end
 
+  defp draw_stereo(:mono), do: :lcd.text(@lcd_w - 16 - 6 * 16, 16, "[MONO]", @fg, @bg, 1)
   defp draw_stereo(true), do: :lcd.text(@lcd_w - 16 - 6 * 16, 16, "STEREO", @accent, @bg, 1)
   defp draw_stereo(false), do: :lcd.text(@lcd_w - 16 - 6 * 16, 16, "  MONO", @dim, @bg, 1)
 

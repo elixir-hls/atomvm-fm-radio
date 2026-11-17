@@ -5,8 +5,8 @@ defmodule FMStereo do
   quadrature (pilot_q). Locked, pilot_q averages to zero and its spread over windows is the
   noise next to 19 kHz (program content is >= 4 kHz away). The metric
   mean(pilot_i)^2 / var(pilot_q) over the last 32 windows (2.2 s) maps to the L-R weight:
-  >= 48 dB full stereo, <= 40 dB mono, linear in between (by ear, at 54 dB stereo is no
-  noisier than mono). The weight rises by at most 16 per window and falls by at most 8
+  >= 44 dB full stereo, <= 36 dB mono, linear in between (a strong station at 42..46 dB is
+  stereo; by ear, at 54 dB stereo is no noisier than mono). The weight rises by at most 16 per window and falls by at most 8
   (slowly, so a short dip does not drop to mono), or by 16 when the pilot is gone
   (pilot_i < 300: a mono broadcast).
 
@@ -18,8 +18,8 @@ defmodule FMStereo do
   import Bitwise
 
   @n 32
-  @full_db 480
-  @mono_db 400
+  @full_db 440
+  @mono_db 360
   @up 16
   @down 8
   @pilot_min 300
