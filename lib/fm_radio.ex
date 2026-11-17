@@ -121,7 +121,8 @@ defmodule FMRadio do
   # in-phase and quadrature parts, at the window's end their means (saturated to 16 bits) in
   # `pilot` {Q[31:16], I[15:0]} and the window count in `win` (bits 21:14; bits 13:0 count
   # the samples) for FMStereo, which reads the state (named :pilot) with pilot/0. Bit-exact
-  # with stereo_pll.v (test/ref/stereo.sh). The sums fit 32 bits: |i_lp|, |q_lp| < 2^17.
+  # with stereo_pll.v (test/ref/stereo.sh) but for its integrator, held within +-2^20 here (the
+  # reference test never reaches it). The sums fit 32 bits: |i_lp|, |q_lp| < 2^17.
   @sin FMCoeffs.sin()
 
   defhls pilot_pll(x :: s18, st :: {u32, s32, s24, s24, u32, s32, s32, u32}) :: {{s18, s20}, {u32, s32, s24, s24, u32, s32, s32, u32}} do
@@ -135,7 +136,10 @@ defmodule FMRadio do
     m = (x * s2) >>> 14
     i2 = signed(i_lp + (((x * s1) >>> 15) - i_lp + 128 >>> 8), 24)
     q2 = signed(q_lp + ((pd >>> 15) - q_lp + 128 >>> 8), 24)
-    integ2 = signed(integ + (pd >>> 16), 32)
+    # the integrator held within +-2^20 (+-58 Hz; locked it stays within +-2^15): through the
+    # noise between stations it wound up to the PLL's whole frequency, and never locked again
+    integ1 = integ + (pd >>> 16)
+    integ2 = if integ1 > 1_048_576, do: 1_048_576, else: if(integ1 < -1_048_576, do: -1_048_576, else: integ1)
     theta2 = unsigned(theta + 0x14444444 + (pd >>> 6) + integ2, 32)
     # the window: the sums, at its last sample the means and the next window count
     si2 = signed(si + i2, 32)
