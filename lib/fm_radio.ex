@@ -47,15 +47,15 @@ defmodule FMRadio do
   # tap k on the k-th newest of the chunk. Bit-exact with chan_fir.v (test/ref/chan.sh).
   @chan FMCoeffs.chan()
 
-  defhls chan_tap(w :: list(u16, 31)) :: u16 do
+  defhls chan_tap(w :: tuple(u16, 31)) :: u16 do
     {ai, aq} =
       for j <- 0..7, reduce: {0, 0} do
         acc ->
           Enum.reduce(0..1, acc, fn u, {ai, aq} ->
             k = 2 * j + u
-            a = Enum.at(w, 30 - k)
-            b = Enum.at(w, k)
-            c = table(@chan, k)
+            a = elem(w, 30 - k)
+            b = elem(w, k)
+            c = Enum.at(@chan, k)
             # pairs (k, 30 - k); the centre tap (15) once
             {bi, bq} = if k == 15, do: {0, 0}, else: {signed(b >>> 8, 8), signed(b &&& 0xFF, 8)}
             {signed(ai + (signed(a >>> 8, 8) + bi) * c, 32), signed(aq + (signed(a &&& 0xFF, 8) + bq) * c, 32)}
@@ -87,9 +87,9 @@ defmodule FMRadio do
           Enum.reduce(0..1, acc, fn u, {x, y, z} ->
             k = 2 * j + u
             if y >= 0 do
-              {signed(x + (y >>> k), 21), signed(y - (x >>> k), 21), unsigned(z + table(@atan, k), 16)}
+              {signed(x + (y >>> k), 21), signed(y - (x >>> k), 21), unsigned(z + Enum.at(@atan, k), 16)}
             else
-              {signed(x - (y >>> k), 21), signed(y + (x >>> k), 21), unsigned(z - table(@atan, k), 16)}
+              {signed(x - (y >>> k), 21), signed(y + (x >>> k), 21), unsigned(z - Enum.at(@atan, k), 16)}
             end
           end)
       end
@@ -104,14 +104,14 @@ defmodule FMRadio do
   @fir1 FMCoeffs.fir1()
   @fir2 FMCoeffs.fir2()
 
-  # The FIRs as pure functions of a chunk of the stream (Enum.at(w, i), 0 the oldest; tap k on
+  # The FIRs as pure functions of a chunk of the stream (elem(w, i), 0 the oldest; tap k on
   # the k-th newest); chunk_every(n, k, :discard) |> map(&f/1) places each one as a
   # time-multiplexed kernel (a ring buffer in a memory, the taps in a loop). Bit-exact with
   # fir_dec.v (test/ref/fir.sh).
 
   # d (s16, 960 kS/s) -> MPX x (s18): 32 taps, saturated (every 4th: 240 kS/s)
-  defhls mpx_tap(w :: list(s16, 32)) :: s18 do
-    v = Enum.sum(for k <- 0..31, do: Enum.at(w, 31 - k) * table(@fir1, k)) >>> 15
+  defhls mpx_tap(w :: tuple(s16, 32)) :: s18 do
+    v = Enum.sum(for k <- 0..31, do: elem(w, 31 - k) * Enum.at(@fir1, k)) >>> 15
     if v > 131_071, do: 131_071, else: if(v < -131_072, do: -131_072, else: v)
   end
 
@@ -121,21 +121,25 @@ defmodule FMRadio do
   # in-phase and quadrature parts, at the window's end their means (saturated to 16 bits) in
   # `pilot` {Q[31:16], I[15:0]} and the window count in `win` (bits 21:14; bits 13:0 count
   # the samples) for FMStereo, which reads the state (named :pilot) with pilot/0. Bit-exact
-  # with stereo_pll.v (test/ref/stereo.sh). The sums fit 32 bits: |i_lp|, |q_lp| < 2^17.
+  # with stereo_pll.v (test/ref/stereo.sh) but for its integrator, held within +-2^20 here (the
+  # reference test never reaches it). The sums fit 32 bits: |i_lp|, |q_lp| < 2^17.
   @sin FMCoeffs.sin()
 
   defhls pilot_pll(x :: s18, st :: {u32, s32, s24, s24, u32, s32, s32, u32}) :: {{s18, s20}, {u32, s32, s24, s24, u32, s32, s32, u32}} do
     {theta, integ, i_lp, q_lp, win, si, sq, pilot} = st
     a = theta >>> 22
-    s1 = table(@sin, a)
-    c1 = table(@sin, a + 256)
-    s2 = table(@sin, theta >>> 21)
+    s1 = Enum.at(@sin, a)
+    c1 = Enum.at(@sin, a + 256)
+    s2 = Enum.at(@sin, theta >>> 21)
     # phase detector, L-R (the subcarrier sin(2 theta)), the pilot's I / Q (low-passed)
     pd = x * c1
     m = (x * s2) >>> 14
     i2 = signed(i_lp + (((x * s1) >>> 15) - i_lp + 128 >>> 8), 24)
     q2 = signed(q_lp + ((pd >>> 15) - q_lp + 128 >>> 8), 24)
-    integ2 = signed(integ + (pd >>> 16), 32)
+    # the integrator held within +-2^20 (+-58 Hz; locked it stays within +-2^15): through the
+    # noise between stations it wound up to the PLL's whole frequency, and never locked again
+    integ1 = integ + (pd >>> 16)
+    integ2 = if integ1 > 1_048_576, do: 1_048_576, else: if(integ1 < -1_048_576, do: -1_048_576, else: integ1)
     theta2 = unsigned(theta + 0x14444444 + (pd >>> 6) + integ2, 32)
     # the window: the sums, at its last sample the means and the next window count
     si2 = signed(si + i2, 32)
@@ -159,12 +163,12 @@ defmodule FMRadio do
   # {x, m} (240 kS/s) -> {L+R, L-R} (s22 each, 48 kHz): FIR2 (224 taps, every 5th) on both, in
   # one loop (two buffer reads and one coefficient per tap). A chunk of 225, its oldest without a
   # tap: the outputs fall on the 5th sample of each 5, as in fir_dec.v (PHASE 4)
-  defhls stereo_tap(w :: list({s18, s20}, 225)) :: {s22, s22} do
+  defhls stereo_tap(w :: tuple({s18, s20}, 225)) :: {s22, s22} do
     {s, d} =
       for k <- 0..223, reduce: {0, 0} do
         {s, d} ->
-          {x, m} = Enum.at(w, 224 - k)
-          c = table(@fir2, k)
+          {x, m} = elem(w, 224 - k)
+          c = Enum.at(@fir2, k)
           {signed(s + x * c, 44), signed(d + m * c, 46)}
       end
 

@@ -77,8 +77,10 @@ RPi Display:
 Tuning and volume repeat while held. The stereo blend follows the pilot as in
 usb-rtl-sdr-tang25k (FMStereo): the pilot PLL measures the pilot over windows of 68 ms, and
 its level against its quadrature's spread over the last 32 windows (pilot / noise, SN) sets
-the L-R weight: mono at 40 dB or less, full stereo from 48 dB, linear in between, rising
+the L-R weight: mono at 36 dB or less, full stereo from 44 dB, linear in between, rising
 quickly and falling slowly; STEREO while the weight is at least half.
+Touching STEREO / MONO forces mono (`[MONO]`) and touching it again goes back to the pilot's
+weight, to hear the two one after the other.
 The screen redraws only what changed, the status line at most once a second. When the IQ
 stops for a second the panel opens the RTL-SDR again. `FMDemo` is a scripted run instead
 (mono / stereo, two stations, 32 s).

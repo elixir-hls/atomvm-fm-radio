@@ -8,8 +8,8 @@ defmodule FMMono do
   @fir2 FMCoeffs.fir2()
 
   # MPX x (s18, 240 kS/s) -> L+R (s22): 224 taps (every 5th: 48 kHz)
-  defhls audio_tap(w :: list(s18, 225)) :: s22 do
-    Enum.sum(for k <- 0..223, do: Enum.at(w, 224 - k) * table(@fir2, k)) >>> 17
+  defhls audio_tap(w :: tuple(s18, 225)) :: s22 do
+    Enum.sum(for k <- 0..223, do: elem(w, 224 - k) * Enum.at(@fir2, k)) >>> 17
   end
 
   # L+R at 48 kHz (s22 in a word) -> a mono frame: DC block (rounded, 2^-10), 50 us
