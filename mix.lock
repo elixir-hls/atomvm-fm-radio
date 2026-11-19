@@ -1,9 +1,0 @@
-%{
-  "atomvm_tang25k": {:git, "https://github.com/elixir-hls/atomvm-tang25k.git", "3bdf9b2b9a971af8c9ccdf3cd1d172f8349c1636", []},
-  "atomvm_tang25k_hls": {:git, "https://github.com/elixir-hls/atomvm-tang25k-hls.git", "da7fb2ce245819516e17d601f99db61bf54081e4", []},
-  "atomvm_tang25k_i2s": {:git, "https://github.com/elixir-hls/atomvm-tang25k-i2s.git", "a6e90f4c45e7989775b7995f030529ebfd4f9337", []},
-  "atomvm_tang25k_rpi_display_35inch": {:git, "https://github.com/elixir-hls/atomvm-tang25k-rpi-display-3.5inch.git", "f40f3daddf7d0cde7aac6561db5f45aff32e04fe", []},
-  "atomvm_tang25k_rtlsdr": {:git, "https://github.com/elixir-hls/atomvm-tang25k-rtlsdr.git", "d122b532d4b16396e36bf1d5dd7ec54b2d084726", []},
-  "atomvm_tang25k_usb_host": {:git, "https://github.com/elixir-hls/atomvm-tang25k-usb-host.git", "6afacf838e70ee2271e0abdd36dd2f03ccec8ee0", []},
-  "elixir_hls": {:git, "https://github.com/elixir-hls/elixir-hls.git", "5a8b4348e291e3f49b24cb784c83e996a7e40697", []},
-}

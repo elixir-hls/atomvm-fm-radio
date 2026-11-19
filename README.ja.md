@@ -8,7 +8,7 @@ AtomVM の上で動く、FM ステレオ放送の受信機です（Sipeed Tang P
 Elixir のプログラムがタッチパネルの画面を動かします。
 
 [atomvm-tang25k-hls](https://github.com/elixir-hls/atomvm-tang25k-hls)（[elixir-hls](https://github.com/elixir-hls/elixir-hls) を使う）と、
-次の部品のパッケージで作っています（mix.exs、hls.env）。
+次の部品のパッケージで作っています（mix.exs、config/config.exs）。
 [atomvm-tang25k-usb-host](https://github.com/elixir-hls/atomvm-tang25k-usb-host)、
 [atomvm-tang25k-rtlsdr](https://github.com/elixir-hls/atomvm-tang25k-rtlsdr)、
 [atomvm-tang25k-i2s](https://github.com/elixir-hls/atomvm-tang25k-i2s)、
@@ -111,25 +111,29 @@ RTLSDR.tune(80_000_000)             # 別の局に切り替える
 - openFPGALoader 1.1.1 以降と、ボードの UART のための `ftdi_sio`
 
 それ以外は Mix がそろえます。`mix deps.get` で、ターゲット（atomvm-tang25k-hls）、elixir-hls、
-atomvm-tang25k、4 つの部品のパッケージが、mix.lock に記録された版で deps/ に入ります。
+atomvm-tang25k、4 つの部品のパッケージが、mix.lock に記録された版で Hex から deps/ に入ります。
 
 ```sh
 git clone https://github.com/elixir-hls/atomvm-fm-radio.git && cd atomvm-fm-radio
 mix deps.get
-B=deps/atomvm_tang25k/scripts                         # 最初に一度: 土台の LiteX、AtomVM、ホストの道具
-$B/setup_litex.sh && $B/setup_atomvm.sh && $B/build_host.sh
+mix ehls.setup                                        # マシンに一度だけ: 土台の LiteX、AtomVM、ホストの道具
+                                                      # （~/.cache/ehls に。数十分）
 
-H=deps/atomvm_tang25k_hls/scripts
-$H/build_kernel.sh lib/fm_radio.ex lib/fm_coeffs.ex   # 12 本のカーネル。どれもシミュレーションで確かめる
-$H/build_soc.sh                                       # SoC（数分。配置の設定は hls.env から）
-$H/build_atomvm.sh && $H/flash.sh vm lib              # USB ホストと液晶の NIF を含む AtomVM
-$H/build_ex.sh fm_radio FMRadio
-SECONDS_RUN=20 $H/run.sh fm_radio                     # アップロードして受信する（そのまま鳴り続ける）
-$H/flash.sh bitstream app fm_radio                    # 単独で起動: 電源を入れると受信機になる
-$H/build_ex.sh fm_demo FMDemo && SECONDS_RUN=40 $H/run.sh fm_demo
+mix ehls.doctor                                       # 設定されているもの、足りないもの
+mix ehls.build                                        # カーネル（どれもシミュレーションで確かめる）、SoC
+                                                      # （数分）、NIF を含む AtomVM、パック
+mix ehls.run --seconds 20                             # アップロードして受信する（そのまま鳴り続ける）
+mix ehls.flash --standalone                           # 単独で起動: 電源を入れると受信機になる
 ```
 
-部品のパッケージを手元で直しながら使うときは、mix.exs の依存先を、git のリポジトリの代わりに、
+アプリケーションの設定は config/config.exs にあります。ターゲット、起動するモジュール
+（`start: FMRadio`。台本どおりに動かすときは `start: FMDemo`）、Gowin の配置（`gowin: [place: 3]`。
+Fmax の余裕がいちばん大きいもの）、ホストでもインスタンスを FPGA に置くこと（`placement: :fpga`）です。
+このマシンでの道具の場所（`GOWIN_HOME`、`UART_PORT`、`ATOMVM_TANG25K` など）は、見つからず環境変数にも
+ないときに config/local.exs（コミットしない）に書きます。`mix ehls.doctor` が一覧を出します。
+`mix ehls.build` は変わったところだけをビルドします（`--dry-run` で、何が動くかを表示）。
+
+部品のパッケージを手元で直しながら使うときは、mix.exs の依存先を、Hex のパッケージの代わりに、
 手元のディレクトリに向けます（`path: "../atomvm-tang25k-hls", override: true`）。依存先の
 依存先（elixir-hls など）も手元のものを使うなら、それも同じように書きます。
 

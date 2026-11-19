@@ -6,7 +6,7 @@ A stereo FM radio on AtomVM (Sipeed Tang Primer 25K) whose whole demodulator is 
 Elixir and runs in the FPGA: the RTL-SDR's IQ goes from the USB host through the demodulator to
 the I2S amplifiers without passing through the CPU, while Elixir on the CPU runs the touch
 screen panel. Built with [atomvm-tang25k-hls](https://github.com/elixir-hls/atomvm-tang25k-hls) (with [elixir-hls](https://github.com/elixir-hls/elixir-hls))
-and the part packages (mix.exs, hls.env)
+and the part packages (mix.exs, config/config.exs)
 [atomvm-tang25k-usb-host](https://github.com/elixir-hls/atomvm-tang25k-usb-host),
 [atomvm-tang25k-rtlsdr](https://github.com/elixir-hls/atomvm-tang25k-rtlsdr),
 [atomvm-tang25k-i2s](https://github.com/elixir-hls/atomvm-tang25k-i2s) and
@@ -109,26 +109,31 @@ What has to be installed first (the README of atomvm-tang25k and of elixir-hls t
 - openFPGALoader 1.1.1 or later, and `ftdi_sio` for the board's UART
 
 Everything else comes with Mix: `mix deps.get` puts the target (atomvm-tang25k-hls), elixir-hls,
-atomvm-tang25k and the four block packages into deps/, at the commits of mix.lock.
+atomvm-tang25k and the four block packages into deps/ from Hex, at the versions of mix.lock.
 
 ```sh
 git clone https://github.com/elixir-hls/atomvm-fm-radio.git && cd atomvm-fm-radio
 mix deps.get
-B=deps/atomvm_tang25k/scripts                         # once: the base's LiteX, AtomVM and host tools
-$B/setup_litex.sh && $B/setup_atomvm.sh && $B/build_host.sh
+mix ehls.setup                                        # once for the machine: the base's LiteX, AtomVM and
+                                                      # host tools (in ~/.cache/ehls, some tens of minutes)
 
-H=deps/atomvm_tang25k_hls/scripts
-$H/build_kernel.sh lib/fm_radio.ex lib/fm_coeffs.ex   # 12 kernels, each checked in simulation
-$H/build_soc.sh                                       # the SoC (a few minutes; the placement option from hls.env)
-$H/build_atomvm.sh && $H/flash.sh vm lib              # AtomVM with the USB host / LCD NIFs
-$H/build_ex.sh fm_radio FMRadio
-SECONDS_RUN=20 $H/run.sh fm_radio                     # upload and play (keeps playing)
-$H/flash.sh bitstream app fm_radio                    # standalone: power on -> the radio
-$H/build_ex.sh fm_demo FMDemo && SECONDS_RUN=40 $H/run.sh fm_demo
+mix ehls.doctor                                       # what is set, what is missing
+mix ehls.build                                        # the kernels (each checked in simulation), the SoC
+                                                      # (a few minutes), AtomVM with the NIFs, the pack
+mix ehls.run --seconds 20                             # upload and play (keeps playing)
+mix ehls.flash --standalone                           # power on -> the radio
 ```
 
+The application's settings are in config/config.exs: the target, the module that starts
+(`start: FMRadio`; `start: FMDemo` for the scripted run), Gowin's placement (`gowin: [place: 3]`,
+the one with the most Fmax margin) and the instances in the FPGA on the host too
+(`placement: :fpga`). Where the tools are on this machine (`GOWIN_HOME`, `UART_PORT`,
+`ATOMVM_TANG25K`, ...) goes into config/local.exs (not committed) when they are neither found nor
+in the environment; `mix ehls.doctor` lists them. `mix ehls.build` builds only what changed
+(`--dry-run`: what would run).
+
 The packages can also be worked on in place: point a dependency in mix.exs at a directory
-instead of its git repository (`path: "../atomvm-tang25k-hls", override: true`), and the
+instead of its Hex package (`path: "../atomvm-tang25k-hls", override: true`), and the
 dependencies it brings (elixir-hls, ...) the same way if those are to come from directories
 too.
 
