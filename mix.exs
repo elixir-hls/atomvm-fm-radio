@@ -6,7 +6,6 @@ defmodule AtomVMFMRadio.MixProject do
       app: :atomvm_fm_radio,
       version: "0.1.0",
       elixir: "~> 1.18",
-      elixirc_paths: [],
       deps: deps()
     ]
   end
@@ -15,12 +14,13 @@ defmodule AtomVMFMRadio.MixProject do
 
   defp deps do
     [
-      # the target (it brings elixir-hls and atomvm-tang25k) and the block packages
-      {:atomvm_tang25k_hls, git: "https://github.com/elixir-hls/atomvm-tang25k-hls.git"},
-      {:atomvm_tang25k_usb_host, git: "https://github.com/elixir-hls/atomvm-tang25k-usb-host.git"},
-      {:atomvm_tang25k_rtlsdr, git: "https://github.com/elixir-hls/atomvm-tang25k-rtlsdr.git"},
-      {:atomvm_tang25k_i2s, git: "https://github.com/elixir-hls/atomvm-tang25k-i2s.git"},
-      {:atomvm_tang25k_rpi_display_35inch, git: "https://github.com/elixir-hls/atomvm-tang25k-rpi-display-3.5inch.git"}
+      # the target, the Tang Primer 25K: it brings elixir-hls and atomvm-tang25k
+      {:atomvm_tang25k_hls, "~> 0.1"},
+      # the block packages (each a block of the SoC; config :elixir_hls, blocks: picks among them); the RTL-SDR brings
+      # the USB host
+      {:atomvm_tang25k_rtlsdr, "~> 0.1"},
+      {:atomvm_tang25k_i2s, "~> 0.1"},
+      {:atomvm_tang25k_rpi_display_35inch, "~> 0.1"}
     ]
   end
 end
