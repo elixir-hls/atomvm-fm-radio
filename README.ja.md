@@ -153,4 +153,8 @@ USB 2.0 のハブを 1 段はさんでも動きます。PHY の RESET はつな�
 
 ## ライセンス
 
-Apache-2.0（[LICENSE](LICENSE) を参照）。
+このリポジトリのソースは Apache-2.0 です（[LICENSE](LICENSE) を参照）。
+
+依存している [`atomvm_tang25k_rtlsdr`](https://hex.pm/packages/atomvm_tang25k_rtlsdr) は
+librtlsdr の移植で、GPL-2.0-or-later です。ビルドしたアプリ（AVM や、それを含むフラッシュの
+イメージ）にはこのパッケージが入るので、配るときは全体を GPL-2.0-or-later として扱ってください。
