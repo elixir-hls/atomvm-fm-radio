@@ -154,4 +154,8 @@ The PHY's RESET is left unconnected.
 
 ## License
 
-Apache-2.0 (see [LICENSE](LICENSE)).
+The source in this repository is Apache-2.0 (see [LICENSE](LICENSE)).
+
+It depends on [`atomvm_tang25k_rtlsdr`](https://hex.pm/packages/atomvm_tang25k_rtlsdr),
+a port of librtlsdr, which is GPL-2.0-or-later. A built application (the AVM, or a flash
+image with it) contains that package, so it goes out under the GPL-2.0-or-later as a whole.
