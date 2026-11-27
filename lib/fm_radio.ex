@@ -43,23 +43,20 @@ defmodule FMRadio do
   end
 
   # The channel filter (31 taps, 120 kHz low-pass, symmetric) on I and Q: signed {I, Q} in,
-  # offset binary out (rounded, saturated to 8 bits). Two symmetric pairs per loop iteration;
+  # offset binary out (rounded, saturated to 8 bits). One symmetric pair per loop iteration;
   # tap k on the k-th newest of the chunk. Bit-exact with chan_fir.v (test/ref/chan.sh).
   @chan FMCoeffs.chan()
 
   defhls chan_tap(w :: tuple(u16, 31)) :: u16 do
     {ai, aq} =
-      for j <- 0..7, reduce: {0, 0} do
-        acc ->
-          Enum.reduce(0..1, acc, fn u, {ai, aq} ->
-            k = 2 * j + u
-            a = elem(w, 30 - k)
-            b = elem(w, k)
-            c = Enum.at(@chan, k)
-            # pairs (k, 30 - k); the centre tap (15) once
-            {bi, bq} = if k == 15, do: {0, 0}, else: {signed(b >>> 8, 8), signed(b &&& 0xFF, 8)}
-            {signed(ai + (signed(a >>> 8, 8) + bi) * c, 32), signed(aq + (signed(a &&& 0xFF, 8) + bq) * c, 32)}
-          end)
+      for k <- 0..15, reduce: {0, 0} do
+        {ai, aq} ->
+          a = elem(w, 30 - k)
+          b = elem(w, k)
+          c = Enum.at(@chan, k)
+          # pairs (k, 30 - k); the centre tap (15) once
+          {bi, bq} = if k == 15, do: {0, 0}, else: {signed(b >>> 8, 8), signed(b &&& 0xFF, 8)}
+          {signed(ai + (signed(a >>> 8, 8) + bi) * c, 32), signed(aq + (signed(a &&& 0xFF, 8) + bq) * c, 32)}
       end
 
     yi = (ai + 32768) >>> 16
@@ -79,19 +76,16 @@ defmodule FMRadio do
     # into the right half plane (x >= 0)
     {x0, y0, z0} = if i < 0, do: {-(i <<< 9), -(q <<< 9), 0x8000}, else: {i <<< 9, q <<< 9, 0}
 
-    # 8 loop iterations (for: time-multiplexed) of 2 micro-rotations each (Enum.reduce:
-    # unrolled); the 16th rotates by atan 0, so z stays as after 15
+    # 16 loop iterations of one micro-rotation each (a `for` loop: the kernel keeps it a loop); the 16th rotates
+    # by atan 0, so z stays as after 15
     {_x, _y, z} =
-      for j <- 0..7, reduce: {x0, y0, z0} do
-        acc ->
-          Enum.reduce(0..1, acc, fn u, {x, y, z} ->
-            k = 2 * j + u
-            if y >= 0 do
-              {signed(x + (y >>> k), 21), signed(y - (x >>> k), 21), unsigned(z + Enum.at(@atan, k), 16)}
-            else
-              {signed(x - (y >>> k), 21), signed(y + (x >>> k), 21), unsigned(z - Enum.at(@atan, k), 16)}
-            end
-          end)
+      for k <- 0..15, reduce: {x0, y0, z0} do
+        {x, y, z} ->
+          if y >= 0 do
+            {signed(x + (y >>> k), 21), signed(y - (x >>> k), 21), unsigned(z + Enum.at(@atan, k), 16)}
+          else
+            {signed(x - (y >>> k), 21), signed(y + (x >>> k), 21), unsigned(z - Enum.at(@atan, k), 16)}
+          end
       end
 
     z
