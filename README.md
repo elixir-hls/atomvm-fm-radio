@@ -125,7 +125,7 @@ mix ehls.flash --standalone                           # power on -> the radio
 ```
 
 The application's settings are in config/config.exs: the target, the module that starts
-(`start: FMRadio`; `start: FMDemo` for the scripted run), Gowin's placement (`gowin: [place: 1]`,
+(`start: FMRadio`; `start: FMDemo` for the scripted run), Gowin's placement and routing (`gowin: [place: 2, route: 1]`,
 the one with the most Fmax margin) and the instances in the FPGA on the host too
 (`placement: :fpga`). Where the tools are on this machine (`GOWIN_HOME`, `UART_PORT`,
 `ATOMVM_TANG25K`, ...) goes into config/local.exs (not committed) when they are neither found nor

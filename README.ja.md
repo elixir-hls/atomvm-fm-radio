@@ -127,7 +127,7 @@ mix ehls.flash --standalone                           # 単独で起動: 電源�
 ```
 
 アプリケーションの設定は config/config.exs にあります。ターゲット、起動するモジュール
-（`start: FMRadio`。台本どおりに動かすときは `start: FMDemo`）、Gowin の配置（`gowin: [place: 1]`。
+（`start: FMRadio`。台本どおりに動かすときは `start: FMDemo`）、Gowin の配置と配線（`gowin: [place: 2, route: 1]`。
 Fmax の余裕がいちばん大きいもの）、ホストでもインスタンスを FPGA に置くこと（`placement: :fpga`）です。
 このマシンでの道具の場所（`GOWIN_HOME`、`UART_PORT`、`ATOMVM_TANG25K` など）は、見つからず環境変数にも
 ないときに config/local.exs（コミットしない）に書きます。`mix ehls.doctor` が一覧を出します。

@@ -3,8 +3,9 @@ import Config
 # the board, the Sipeed Tang Primer 25K (atomvm-tang25k-hls); FMRadio.start/0 runs on it (FMDemo: the scripted run)
 config :elixir_hls, target: :tang25k, start: FMRadio
 
-# the placement with the most Fmax margin (sweep_soc.sh: 13.5%, on the ULPI clock; the default, 2 and 3 leave under 5%)
-config :elixir_hls, gowin: [place: 1]
+# the placement and routing with the most Fmax margin (sweep_soc.sh: 16.8%, on the system clock; place 1 and 2 with
+# the default routing leave under 5% there)
+config :elixir_hls, gowin: [place: 2, route: 1]
 
 # the instances in the FPGA on the host too (mix compile, mix test): the radio's source and sink, usb_bulk_in and
 # i2s_out, are blocks of the SoC and have no CPU version
